@@ -149,6 +149,14 @@ export class GeneticAlgorithm {
       sectionSchedule.get(sId)!.add(`${day}-${slot}`);
     };
 
+    const pickFaculty = (subject: Subject, day: Day, slot: number): string | null => {
+      const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
+      for (const fid of eligible) {
+        if (isFacultyFree(fid, day, slot)) return fid;
+      }
+      return null;
+    };
+
     // 1. Fixed classes
     for (const fc of this.fixedClasses) {
       sessions.push({
@@ -217,7 +225,7 @@ export class GeneticAlgorithm {
           if (labHours > 0) {
             const placed = this.placeConsecutive(
               sessions, section.id, section.yearNumber, subject, labHours,
-              isFacultyFree, isSectionFree, markFaculty, markSection
+              isFacultyFree, isSectionFree, markFaculty, markSection, pickFaculty
             );
             remaining -= placed;
           }
@@ -247,19 +255,20 @@ export class GeneticAlgorithm {
           for (const slot of slots) {
             if (remaining <= 0) break;
             if (!isSectionFree(section.id, day, slot.slotIndex)) continue;
-            if (!isFacultyFree(subject.facultyId, day, slot.slotIndex)) continue;
+            const chosenFaculty = pickFaculty(subject, day, slot.slotIndex);
+            if (!chosenFaculty) continue;
 
             sessions.push({
               sectionId: section.id,
               yearNumber: section.yearNumber,
               subjectCode: subject.code,
-              facultyId: subject.facultyId,
+              facultyId: chosenFaculty,
               day,
               slotIndex: slot.slotIndex,
               isFixed: false,
               isCareerPath: false,
             });
-            markFaculty(subject.facultyId, day, slot.slotIndex);
+            markFaculty(chosenFaculty, day, slot.slotIndex);
             markSection(section.id, day, slot.slotIndex);
             daysUsed.add(day);
             remaining--;
@@ -273,19 +282,19 @@ export class GeneticAlgorithm {
             for (const slot of this.timeSlotManager.getValidSlots(day)) {
               if (remaining <= 0) break;
               if (!isSectionFree(section.id, day, slot.slotIndex)) continue;
-              if (!isFacultyFree(subject.facultyId, day, slot.slotIndex))
-                continue;
+              const chosenFaculty = pickFaculty(subject, day, slot.slotIndex);
+              if (!chosenFaculty) continue;
               sessions.push({
                 sectionId: section.id,
                 yearNumber: section.yearNumber,
                 subjectCode: subject.code,
-                facultyId: subject.facultyId,
+                facultyId: chosenFaculty,
                 day,
                 slotIndex: slot.slotIndex,
                 isFixed: false,
                 isCareerPath: false,
               });
-              markFaculty(subject.facultyId, day, slot.slotIndex);
+              markFaculty(chosenFaculty, day, slot.slotIndex);
               markSection(section.id, day, slot.slotIndex);
               remaining--;
             }
@@ -306,7 +315,8 @@ export class GeneticAlgorithm {
     isFacultyFree: (f: string, d: Day, s: number) => boolean,
     isSectionFree: (s: string, d: Day, sl: number) => boolean,
     markFaculty: (f: string, d: Day, s: number) => void,
-    markSection: (s: string, d: Day, sl: number) => void
+    markSection: (s: string, d: Day, sl: number) => void,
+    pickFaculty: (sub: Subject, d: Day, sl: number) => string | null
   ): number {
     const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
 
@@ -330,28 +340,36 @@ export class GeneticAlgorithm {
         if (!ok) continue;
 
         for (const c of candidates) {
-          if (
-            !isSectionFree(sectionId, day, c.slotIndex) ||
-            !isFacultyFree(subject.facultyId, day, c.slotIndex)
-          ) {
+          if (!isSectionFree(sectionId, day, c.slotIndex)) {
             ok = false;
             break;
           }
         }
         if (!ok) continue;
 
+        // Find a single faculty free for ALL consecutive slots
+        const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
+        let chosenFaculty: string | null = null;
+        for (const fid of eligible) {
+          if (candidates.every(c => isFacultyFree(fid, day, c.slotIndex))) {
+            chosenFaculty = fid;
+            break;
+          }
+        }
+        if (!chosenFaculty) continue;
+
         for (const c of candidates) {
           sessions.push({
             sectionId,
             yearNumber,
             subjectCode: subject.code,
-            facultyId: subject.facultyId,
+            facultyId: chosenFaculty,
             day,
             slotIndex: c.slotIndex,
             isFixed: false,
             isCareerPath: false,
           });
-          markFaculty(subject.facultyId, day, c.slotIndex);
+          markFaculty(chosenFaculty, day, c.slotIndex);
           markSection(sectionId, day, c.slotIndex);
         }
         return hours;
@@ -391,8 +409,25 @@ export class GeneticAlgorithm {
     if (mutable.length === 0) return chromosome;
 
     const session = mutable[Math.floor(Math.random() * mutable.length)];
-    const days = [...DAYS].sort(() => Math.random() - 0.5);
+    const subject = this.subjects.find(s => s.code === session.subjectCode);
 
+    // 50% chance: try to change faculty assignment instead of time slot
+    if (subject && subject.eligibleFacultyIds.length > 1 && Math.random() < 0.5) {
+      const otherFaculty = subject.eligibleFacultyIds.filter(f => f !== session.facultyId);
+      const shuffled = otherFaculty.sort(() => Math.random() - 0.5);
+      for (const fid of shuffled) {
+        const conflict = chromosome.some(
+          s => s !== session && s.facultyId === fid && s.day === session.day && s.slotIndex === session.slotIndex
+        );
+        if (!conflict) {
+          session.facultyId = fid;
+          return chromosome;
+        }
+      }
+    }
+
+    // Otherwise mutate time slot
+    const days = [...DAYS].sort(() => Math.random() - 0.5);
     for (const day of days) {
       const slots = this.timeSlotManager
         .getValidSlots(day)
@@ -425,6 +460,31 @@ export class GeneticAlgorithm {
         repaired.push(session);
       }
     }
+
+    // Repair faculty conflicts by reassigning to eligible faculty
+    const subjectMap = new Map(this.subjects.map(s => [s.code, s]));
+    const facultySlotMap = new Map<string, ClassSession>();
+    for (const session of repaired) {
+      const fKey = `${session.facultyId}-${session.day}-${session.slotIndex}`;
+      const existing = facultySlotMap.get(fKey);
+      if (existing && !session.isFixed) {
+        // Try reassigning this session's faculty
+        const subject = subjectMap.get(session.subjectCode);
+        if (subject && subject.eligibleFacultyIds.length > 1) {
+          for (const fid of subject.eligibleFacultyIds) {
+            const altKey = `${fid}-${session.day}-${session.slotIndex}`;
+            if (!facultySlotMap.has(altKey)) {
+              session.facultyId = fid;
+              facultySlotMap.set(altKey, session);
+              break;
+            }
+          }
+        }
+      } else {
+        facultySlotMap.set(fKey, session);
+      }
+    }
+
     return repaired;
   }
 }

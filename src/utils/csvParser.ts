@@ -45,15 +45,22 @@ export function parseFacultyCSV(text: string): Faculty[] {
 export function parseSubjectCSV(text: string): Subject[] {
   const rows = parseCSVRows(text);
   const start = rows[0]?.[0]?.toLowerCase() === 'code' ? 1 : 0;
-  return rows.slice(start).filter(r => r.length >= 6).map((r) => ({
-    code: r[0],
-    name: r[1],
-    facultyId: r[2],
-    weeklyHours: parseInt(r[3], 10) || 0,
-    subjectType: parseSubjectType(r[4]),
-    labHours: parseInt(r[5], 10) || 0,
-    yearNumber: parseInt(r[6], 10) || 1,
-  }));
+  return rows.slice(start).filter(r => r.length >= 6).map((r) => {
+    const primaryFaculty = r[2];
+    // Column 7 (index 7) can hold semicolon-separated eligible faculty IDs
+    const extraFaculty = r[7] ? r[7].split(';').map(f => f.trim()).filter(Boolean) : [];
+    const eligibleFacultyIds = [...new Set([primaryFaculty, ...extraFaculty])];
+    return {
+      code: r[0],
+      name: r[1],
+      facultyId: primaryFaculty,
+      eligibleFacultyIds,
+      weeklyHours: parseInt(r[3], 10) || 0,
+      subjectType: parseSubjectType(r[4]),
+      labHours: parseInt(r[5], 10) || 0,
+      yearNumber: parseInt(r[6], 10) || 1,
+    };
+  });
 }
 
 export function parseSectionCSV(text: string): Section[] {

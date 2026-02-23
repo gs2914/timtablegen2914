@@ -59,22 +59,31 @@ export default function DataInput() {
   const [subCode, setSubCode] = useState('');
   const [subName, setSubName] = useState('');
   const [subFaculty, setSubFaculty] = useState('');
+  const [subEligibleFaculty, setSubEligibleFaculty] = useState<string[]>([]);
   const [subHours, setSubHours] = useState('3');
   const [subType, setSubType] = useState<SubjectType>(SubjectType.THEORY);
   const [subLabHours, setSubLabHours] = useState('0');
   const [subYear, setSubYear] = useState('1');
 
+  const toggleEligibleFaculty = (fid: string) => {
+    setSubEligibleFaculty(prev =>
+      prev.includes(fid) ? prev.filter(f => f !== fid) : [...prev, fid]
+    );
+  };
+
   const addSubject = () => {
     if (!subCode || !subName || !subFaculty) return;
+    const eligibleFacultyIds = [...new Set([subFaculty, ...subEligibleFaculty])];
     dispatch({
       type: 'ADD_SUBJECT',
       payload: {
         code: subCode, name: subName, facultyId: subFaculty,
+        eligibleFacultyIds,
         weeklyHours: parseInt(subHours), subjectType: subType,
         labHours: parseInt(subLabHours), yearNumber: parseInt(subYear),
       },
     });
-    setSubCode(''); setSubName('');
+    setSubCode(''); setSubName(''); setSubEligibleFaculty([]);
   };
 
   // Section form
@@ -219,6 +228,23 @@ export default function DataInput() {
                 </div>
                 <div><Label className="text-xs">Lab Hours</Label><Input type="number" value={subLabHours} onChange={(e) => setSubLabHours(e.target.value)} className="h-8 text-sm" /></div>
               </div>
+              {data.faculty.length > 0 && (
+                <div>
+                  <Label className="text-xs">Additional Eligible Faculty (optional)</Label>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {data.faculty.filter(f => f.id !== subFaculty).map(f => (
+                      <Badge
+                        key={f.id}
+                        variant={subEligibleFaculty.includes(f.id) ? 'default' : 'outline'}
+                        className="text-[10px] cursor-pointer"
+                        onClick={() => toggleEligibleFaculty(f.id)}
+                      >
+                        {f.shortName}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
               <Button size="sm" onClick={addSubject} className="w-full"><Plus className="h-3 w-3 mr-1" /> Add Subject</Button>
               <div className="space-y-1 mt-2 max-h-40 overflow-auto">
                 {data.subjects.map((s) => (
@@ -227,6 +253,9 @@ export default function DataInput() {
                       <span className="font-semibold">{s.code}</span> — {s.name}
                       <Badge variant="outline" className="ml-1 text-[10px]">{s.subjectType}</Badge>
                       <span className="text-muted-foreground ml-1">Y{s.yearNumber} {s.weeklyHours}h/w</span>
+                      {s.eligibleFacultyIds.length > 1 && (
+                        <Badge variant="secondary" className="ml-1 text-[10px]">{s.eligibleFacultyIds.length} faculty</Badge>
+                      )}
                     </div>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => dispatch({ type: 'REMOVE_SUBJECT', payload: s.code })}>
                       <Trash2 className="h-3 w-3" />
