@@ -1,4 +1,4 @@
-import { ClassSession, Subject, SubjectType } from '@/types/timetable';
+import { ClassSession, Subject, SubjectType, FacultySectionMapping } from '@/types/timetable';
 import { TimeSlotManager } from './timeSlotManager';
 
 export interface ConstraintViolation {
@@ -10,10 +10,12 @@ export interface ConstraintViolation {
 export class ConstraintEngine {
   private timeSlotManager: TimeSlotManager;
   private subjects: Map<string, Subject>;
+  private facultyMappings: FacultySectionMapping[];
 
-  constructor(timeSlotManager: TimeSlotManager, subjects: Subject[]) {
+  constructor(timeSlotManager: TimeSlotManager, subjects: Subject[], facultyMappings: FacultySectionMapping[] = []) {
     this.timeSlotManager = timeSlotManager;
     this.subjects = new Map(subjects.map((s) => [s.code, s]));
+    this.facultyMappings = facultyMappings;
   }
 
   evaluateAll(sessions: ClassSession[]): ConstraintViolation[] {
@@ -23,6 +25,7 @@ export class ConstraintEngine {
       ...this.checkInvalidSlots(sessions),
       ...this.checkLabContinuity(sessions),
       ...this.checkCareerPathSync(sessions),
+      ...this.checkFacultyMappingViolations(sessions),
       ...this.checkSoftConstraints(sessions),
     ];
   }
@@ -133,6 +136,24 @@ export class ConstraintEngine {
             penalty: 1000,
           });
         }
+      }
+    }
+    return violations;
+  }
+
+  /** Hard constraint: sessions must respect pre-assigned faculty-section mappings */
+  private checkFacultyMappingViolations(sessions: ClassSession[]): ConstraintViolation[] {
+    const violations: ConstraintViolation[] = [];
+    for (const session of sessions) {
+      const mapping = this.facultyMappings.find(
+        m => m.subjectCode === session.subjectCode && m.sectionId === session.sectionId
+      );
+      if (mapping && session.facultyId !== mapping.facultyId) {
+        violations.push({
+          type: 'hard',
+          message: `Faculty mapping violated: ${session.subjectCode} in ${session.sectionId} should be ${mapping.facultyId}`,
+          penalty: 1000,
+        });
       }
     }
     return violations;

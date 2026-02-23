@@ -6,9 +6,11 @@ import {
   CareerPathClass,
   Day,
   SubjectType,
+  FacultySectionMapping,
 } from '@/types/timetable';
 import { ConstraintEngine } from './constraintEngine';
 import { TimeSlotManager, DAYS } from './timeSlotManager';
+import { getAssignedFaculty } from './facultySectionAssigner';
 
 interface GAConfig {
   populationSize: number;
@@ -41,6 +43,7 @@ export class GeneticAlgorithm {
   private sections: Section[];
   private fixedClasses: FixedClass[];
   private careerPathClasses: CareerPathClass[];
+  private facultyMappings: FacultySectionMapping[];
 
   constructor(
     constraintEngine: ConstraintEngine,
@@ -49,6 +52,7 @@ export class GeneticAlgorithm {
     sections: Section[],
     fixedClasses: FixedClass[],
     careerPathClasses: CareerPathClass[],
+    facultyMappings: FacultySectionMapping[],
     config?: Partial<GAConfig>
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -58,6 +62,7 @@ export class GeneticAlgorithm {
     this.sections = sections;
     this.fixedClasses = fixedClasses;
     this.careerPathClasses = careerPathClasses;
+    this.facultyMappings = facultyMappings;
   }
 
   run(onProgress?: (gen: number, bestFitness: number) => void): GAResult {
@@ -149,7 +154,12 @@ export class GeneticAlgorithm {
       sectionSchedule.get(sId)!.add(`${day}-${slot}`);
     };
 
-    const pickFaculty = (subject: Subject, day: Day, slot: number): string | null => {
+    const pickFaculty = (subject: Subject, sectionId: string, day: Day, slot: number): string | null => {
+      // Check pre-assignment first
+      const preAssigned = getAssignedFaculty(this.facultyMappings, subject.code, sectionId);
+      if (preAssigned) {
+        return isFacultyFree(preAssigned, day, slot) ? preAssigned : null;
+      }
       const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
       for (const fid of eligible) {
         if (isFacultyFree(fid, day, slot)) return fid;
@@ -225,7 +235,7 @@ export class GeneticAlgorithm {
           if (labHours > 0) {
             const placed = this.placeConsecutive(
               sessions, section.id, section.yearNumber, subject, labHours,
-              isFacultyFree, isSectionFree, markFaculty, markSection, pickFaculty
+              isFacultyFree, isSectionFree, markFaculty, markSection
             );
             remaining -= placed;
           }
@@ -255,7 +265,7 @@ export class GeneticAlgorithm {
           for (const slot of slots) {
             if (remaining <= 0) break;
             if (!isSectionFree(section.id, day, slot.slotIndex)) continue;
-            const chosenFaculty = pickFaculty(subject, day, slot.slotIndex);
+            const chosenFaculty = pickFaculty(subject, section.id, day, slot.slotIndex);
             if (!chosenFaculty) continue;
 
             sessions.push({
@@ -282,7 +292,7 @@ export class GeneticAlgorithm {
             for (const slot of this.timeSlotManager.getValidSlots(day)) {
               if (remaining <= 0) break;
               if (!isSectionFree(section.id, day, slot.slotIndex)) continue;
-              const chosenFaculty = pickFaculty(subject, day, slot.slotIndex);
+              const chosenFaculty = pickFaculty(subject, section.id, day, slot.slotIndex);
               if (!chosenFaculty) continue;
               sessions.push({
                 sectionId: section.id,
@@ -316,7 +326,6 @@ export class GeneticAlgorithm {
     isSectionFree: (s: string, d: Day, sl: number) => boolean,
     markFaculty: (f: string, d: Day, s: number) => void,
     markSection: (s: string, d: Day, sl: number) => void,
-    pickFaculty: (sub: Subject, d: Day, sl: number) => string | null
   ): number {
     const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
 
@@ -347,13 +356,20 @@ export class GeneticAlgorithm {
         }
         if (!ok) continue;
 
-        // Find a single faculty free for ALL consecutive slots
-        const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
+        // Use pre-assigned faculty or find eligible one free for all slots
+        const preAssigned = getAssignedFaculty(this.facultyMappings, subject.code, sectionId);
         let chosenFaculty: string | null = null;
-        for (const fid of eligible) {
-          if (candidates.every(c => isFacultyFree(fid, day, c.slotIndex))) {
-            chosenFaculty = fid;
-            break;
+        if (preAssigned) {
+          if (candidates.every(c => isFacultyFree(preAssigned, day, c.slotIndex))) {
+            chosenFaculty = preAssigned;
+          }
+        } else {
+          const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
+          for (const fid of eligible) {
+            if (candidates.every(c => isFacultyFree(fid, day, c.slotIndex))) {
+              chosenFaculty = fid;
+              break;
+            }
           }
         }
         if (!chosenFaculty) continue;
@@ -412,7 +428,9 @@ export class GeneticAlgorithm {
     const subject = this.subjects.find(s => s.code === session.subjectCode);
 
     // 50% chance: try to change faculty assignment instead of time slot
-    if (subject && subject.eligibleFacultyIds.length > 1 && Math.random() < 0.5) {
+    // BUT only if there's no pre-assignment locking this faculty
+    const preAssigned = getAssignedFaculty(this.facultyMappings, session.subjectCode, session.sectionId);
+    if (!preAssigned && subject && subject.eligibleFacultyIds.length > 1 && Math.random() < 0.5) {
       const otherFaculty = subject.eligibleFacultyIds.filter(f => f !== session.facultyId);
       const shuffled = otherFaculty.sort(() => Math.random() - 0.5);
       for (const fid of shuffled) {
@@ -468,15 +486,18 @@ export class GeneticAlgorithm {
       const fKey = `${session.facultyId}-${session.day}-${session.slotIndex}`;
       const existing = facultySlotMap.get(fKey);
       if (existing && !session.isFixed) {
-        // Try reassigning this session's faculty
-        const subject = subjectMap.get(session.subjectCode);
-        if (subject && subject.eligibleFacultyIds.length > 1) {
-          for (const fid of subject.eligibleFacultyIds) {
-            const altKey = `${fid}-${session.day}-${session.slotIndex}`;
-            if (!facultySlotMap.has(altKey)) {
-              session.facultyId = fid;
-              facultySlotMap.set(altKey, session);
-              break;
+        // Only reassign if not pre-assigned
+        const preAssignedFaculty = getAssignedFaculty(this.facultyMappings, session.subjectCode, session.sectionId);
+        if (!preAssignedFaculty) {
+          const subject = subjectMap.get(session.subjectCode);
+          if (subject && subject.eligibleFacultyIds.length > 1) {
+            for (const fid of subject.eligibleFacultyIds) {
+              const altKey = `${fid}-${session.day}-${session.slotIndex}`;
+              if (!facultySlotMap.has(altKey)) {
+                session.facultyId = fid;
+                facultySlotMap.set(altKey, session);
+                break;
+              }
             }
           }
         }

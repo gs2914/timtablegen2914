@@ -8,6 +8,7 @@ import { Play, RotateCcw, AlertCircle, CheckCircle } from 'lucide-react';
 import { TimeSlotManager } from '@/core/timeSlotManager';
 import { ConstraintEngine } from '@/core/constraintEngine';
 import { GeneticAlgorithm, GAResult } from '@/core/geneticAlgorithm';
+import { buildFacultySectionMappings } from '@/core/facultySectionAssigner';
 
 export default function Generate() {
   const { data, dispatch } = useTimetable();
@@ -52,10 +53,17 @@ export default function Generate() {
     setTimeout(() => {
       try {
         const tsm = new TimeSlotManager();
-        const ce = new ConstraintEngine(tsm, data.subjects);
+
+        // Build immutable faculty-section mappings before scheduling
+        const mappings = buildFacultySectionMappings(data.subjects, data.sections);
+        dispatch({ type: 'SET_FACULTY_SECTION_MAPPINGS', payload: mappings });
+
+        const ce = new ConstraintEngine(tsm, data.subjects, mappings);
+
+
         const ga = new GeneticAlgorithm(
           ce, tsm, data.subjects, data.sections,
-          data.fixedClasses, data.careerPathClasses
+          data.fixedClasses, data.careerPathClasses, mappings
         );
 
         const res = ga.run((gen, fitness) => {
