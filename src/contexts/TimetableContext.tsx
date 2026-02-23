@@ -8,6 +8,7 @@ import {
   FixedClass,
   CareerPathClass,
   ClassSession,
+  FacultySectionMapping,
 } from '@/types/timetable';
 
 type Action =
@@ -26,6 +27,7 @@ type Action =
   | { type: 'SET_CAREER_CLASSES'; payload: CareerPathClass[] }
   | { type: 'ADD_CAREER_CLASS'; payload: CareerPathClass }
   | { type: 'REMOVE_CAREER_CLASS'; payload: number }
+  | { type: 'SET_FACULTY_SECTION_MAPPINGS'; payload: FacultySectionMapping[] }
   | { type: 'SET_TIMETABLE'; payload: ClassSession[] | null }
   | { type: 'RESET' };
 
@@ -46,6 +48,7 @@ function reducer(state: TimetableData, action: Action): TimetableData {
     case 'SET_CAREER_CLASSES': return { ...state, careerPathClasses: action.payload };
     case 'ADD_CAREER_CLASS': return { ...state, careerPathClasses: [...state.careerPathClasses, action.payload] };
     case 'REMOVE_CAREER_CLASS': return { ...state, careerPathClasses: state.careerPathClasses.filter((_, i) => i !== action.payload) };
+    case 'SET_FACULTY_SECTION_MAPPINGS': return { ...state, facultySectionMappings: action.payload };
     case 'SET_TIMETABLE': return { ...state, generatedTimetable: action.payload };
     case 'RESET': return INITIAL_DATA;
     default: return state;

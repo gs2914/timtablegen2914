@@ -69,12 +69,20 @@ export interface CareerPathClass {
   slotIndex: number;
 }
 
+export interface FacultySectionMapping {
+  subjectCode: string;
+  sectionId: string;
+  facultyId: string;
+  yearNumber: number;
+}
+
 export interface TimetableData {
   faculty: Faculty[];
   subjects: Subject[];
   sections: Section[];
   fixedClasses: FixedClass[];
   careerPathClasses: CareerPathClass[];
+  facultySectionMappings: FacultySectionMapping[];
   generatedTimetable: ClassSession[] | null;
 }
 
@@ -84,5 +92,6 @@ export const INITIAL_DATA: TimetableData = {
   sections: [],
   fixedClasses: [],
   careerPathClasses: [],
+  facultySectionMappings: [],
   generatedTimetable: null,
 };
