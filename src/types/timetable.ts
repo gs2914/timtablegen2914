@@ -21,6 +21,7 @@ export interface Subject {
   code: string;
   name: string;
   facultyId: string;
+  eligibleFacultyIds: string[];
   weeklyHours: number;
   subjectType: SubjectType;
   labHours: number;

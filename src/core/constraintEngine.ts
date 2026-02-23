@@ -180,6 +180,33 @@ export class ConstraintEngine {
       }
     }
 
+    // Workload balancing across eligible faculty for multi-faculty subjects
+    const subjectFacultyLoad = new Map<string, Map<string, number>>();
+    for (const session of sessions) {
+      const subject = this.subjects.get(session.subjectCode);
+      if (!subject || subject.eligibleFacultyIds.length <= 1) continue;
+      if (!subjectFacultyLoad.has(session.subjectCode)) {
+        subjectFacultyLoad.set(session.subjectCode, new Map());
+      }
+      const loads = subjectFacultyLoad.get(session.subjectCode)!;
+      loads.set(session.facultyId, (loads.get(session.facultyId) || 0) + 1);
+    }
+    for (const [, loads] of subjectFacultyLoad) {
+      const counts = [...loads.values()];
+      if (counts.length > 0) {
+        const max = Math.max(...counts);
+        const min = Math.min(...counts);
+        const imbalance = max - min;
+        if (imbalance > 2) {
+          violations.push({
+            type: 'soft',
+            message: `Faculty workload imbalance`,
+            penalty: 5 * (imbalance - 2),
+          });
+        }
+      }
+    }
+
     return violations;
   }
 }
