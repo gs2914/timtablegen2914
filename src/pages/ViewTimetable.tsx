@@ -3,12 +3,11 @@ import { useTimetable } from '@/contexts/TimetableContext';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import TimetableGrid from '@/components/timetable/TimetableGrid';
+import { ClassSession } from '@/types/timetable';
 
 export default function ViewTimetable() {
-  const { data } = useTimetable();
+  const { data, dispatch } = useTimetable();
   const [selectedSection, setSelectedSection] = useState<string>('');
-
-  const years = [...new Set(data.sections.map((s) => s.yearNumber))].sort();
 
   if (!data.generatedTimetable) {
     return (
@@ -22,6 +21,22 @@ export default function ViewTimetable() {
   const filteredSections = selectedSection && selectedSection !== 'all'
     ? data.sections.filter((s) => s.id === selectedSection)
     : data.sections;
+
+  const handleEditSession = (original: ClassSession, updated: ClassSession) => {
+    const newTimetable = data.generatedTimetable!.map(s => {
+      if (
+        s.sectionId === original.sectionId &&
+        s.day === original.day &&
+        s.slotIndex === original.slotIndex &&
+        s.subjectCode === original.subjectCode &&
+        s.facultyId === original.facultyId
+      ) {
+        return { ...updated };
+      }
+      return s;
+    });
+    dispatch({ type: 'SET_TIMETABLE', payload: newTimetable });
+  };
 
   return (
     <div className="p-4 space-y-4 animate-fade-in">
@@ -46,6 +61,8 @@ export default function ViewTimetable() {
         </Select>
       </div>
 
+      <p className="text-[10px] text-muted-foreground">Click any cell to edit subject or faculty. Fixed cells cannot be edited.</p>
+
       <div className="space-y-6">
         {filteredSections.map((section) => (
           <div key={section.id}>
@@ -57,6 +74,9 @@ export default function ViewTimetable() {
               section={section}
               subjects={data.subjects}
               faculty={data.faculty}
+              facultyMappings={data.facultySectionMappings}
+              onEditSession={handleEditSession}
+              editable
             />
           </div>
         ))}
