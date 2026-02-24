@@ -7,7 +7,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Trash2, Upload, Plus } from 'lucide-react';
+import { Trash2, Upload, Plus, Pencil } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { toast } from '@/hooks/use-toast';
 import { Day, SubjectType, Faculty, Subject, Section, FixedClass, CareerPathClass } from '@/types/timetable';
 import { parseFacultyCSV, parseSubjectCSV, parseSectionCSV, parseFixedClassCSV, parseCareerPathCSV } from '@/utils/csvParser';
@@ -45,6 +56,15 @@ export default function DataInput() {
   const [facId, setFacId] = useState('');
   const [facName, setFacName] = useState('');
 
+  // Faculty edit state
+  const [editFacOpen, setEditFacOpen] = useState(false);
+  const [editFac, setEditFac] = useState<Faculty | null>(null);
+  const [editFacName, setEditFacName] = useState('');
+
+  // Faculty delete confirmation
+  const [deleteFacOpen, setDeleteFacOpen] = useState(false);
+  const [deleteFacId, setDeleteFacId] = useState<string | null>(null);
+
   const addFaculty = () => {
     if (!facId || !facName) return;
     if (data.faculty.find((f) => f.id === facId)) {
@@ -53,6 +73,37 @@ export default function DataInput() {
     }
     dispatch({ type: 'ADD_FACULTY', payload: { id: facId, shortName: facName } });
     setFacId(''); setFacName('');
+  };
+
+  const openEditFaculty = (f: Faculty) => {
+    setEditFac(f);
+    setEditFacName(f.shortName);
+    setEditFacOpen(true);
+  };
+
+  const saveEditFaculty = () => {
+    if (!editFac || !editFacName.trim()) return;
+    dispatch({ type: 'UPDATE_FACULTY', payload: { id: editFac.id, shortName: editFacName.trim() } });
+    setEditFacOpen(false);
+    toast({ title: 'Faculty updated' });
+  };
+
+  const confirmDeleteFaculty = (fid: string) => {
+    const isMapped = data.subjects.some(s => s.facultyId === fid || s.eligibleFacultyIds.includes(fid));
+    if (isMapped) {
+      setDeleteFacId(fid);
+      setDeleteFacOpen(true);
+    } else {
+      dispatch({ type: 'REMOVE_FACULTY', payload: fid });
+    }
+  };
+
+  const executeDeleteFaculty = () => {
+    if (deleteFacId) {
+      dispatch({ type: 'REMOVE_FACULTY', payload: deleteFacId });
+      setDeleteFacOpen(false);
+      setDeleteFacId(null);
+    }
   };
 
   // Subject form
@@ -183,11 +234,22 @@ export default function DataInput() {
                 <div><Label className="text-xs">Short Name</Label><Input value={facName} onChange={(e) => setFacName(e.target.value)} placeholder="Dr.K" className="h-8 text-sm" /></div>
               </div>
               <Button size="sm" onClick={addFaculty} className="w-full"><Plus className="h-3 w-3 mr-1" /> Add Faculty</Button>
-              <div className="flex flex-wrap gap-1 mt-2">
+              <div className="space-y-1 mt-2 max-h-48 overflow-auto">
                 {data.faculty.map((f) => (
-                  <Badge key={f.id} variant="secondary" className="text-xs cursor-pointer" onClick={() => dispatch({ type: 'REMOVE_FACULTY', payload: f.id })}>
-                    {f.shortName} ({f.id}) <Trash2 className="h-2.5 w-2.5 ml-1" />
-                  </Badge>
+                  <div key={f.id} className="flex items-center justify-between p-2 bg-muted rounded text-xs">
+                    <div>
+                      <span className="font-semibold">{f.shortName}</span>
+                      <span className="text-muted-foreground ml-1">({f.id})</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditFaculty(f)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => confirmDeleteFaculty(f.id)}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </CardContent>
@@ -438,6 +500,47 @@ export default function DataInput() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Faculty Edit Dialog */}
+      <Dialog open={editFacOpen} onOpenChange={setEditFacOpen}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Edit Faculty</DialogTitle>
+          </DialogHeader>
+          {editFac && (
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Faculty ID (read-only)</Label>
+                <Input value={editFac.id} disabled className="h-8 text-sm bg-muted" />
+              </div>
+              <div>
+                <Label className="text-xs">Short Name</Label>
+                <Input value={editFacName} onChange={(e) => setEditFacName(e.target.value)} className="h-8 text-sm" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditFacOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={saveEditFaculty}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Faculty Delete Confirmation */}
+      <AlertDialog open={deleteFacOpen} onOpenChange={setDeleteFacOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Faculty?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This faculty is currently mapped to one or more subjects. Deleting will remove the mapping. Are you sure?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={executeDeleteFaculty}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { Home, Database, Play, Eye, Users, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -12,9 +12,9 @@ const navItems = [
   { to: '/export', icon: Download, label: 'Export' },
 ];
 
-export default function AppLayout() {
+const AppLayout = forwardRef<HTMLDivElement>((_, ref) => {
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    <div ref={ref} className="flex flex-col min-h-screen bg-background">
       <header className="border-b bg-card px-4 py-3 flex items-center gap-3">
         <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
           <span className="text-primary-foreground font-bold text-sm">TT</span>
@@ -51,4 +51,7 @@ export default function AppLayout() {
       </nav>
     </div>
   );
-}
+});
+AppLayout.displayName = 'AppLayout';
+
+export default AppLayout;
