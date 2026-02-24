@@ -73,7 +73,7 @@ export default function TimetableGrid({
       ...editTarget,
       subjectCode: editSubjectCode,
       facultyId: editFacultyId,
-      secondFacultyId: editSecondFacultyId || undefined,
+      secondFacultyId: (editSecondFacultyId && editSecondFacultyId !== '__none__') ? editSecondFacultyId : undefined,
     };
 
     // Validate second faculty clash
@@ -220,7 +220,7 @@ export default function TimetableGrid({
                     <Select value={editSecondFacultyId} onValueChange={setEditSecondFacultyId}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="None" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">None</SelectItem>
+                        <SelectItem value="__none__">None</SelectItem>
                         {faculty.filter(f => f.id !== editFacultyId).map(f => (
                           <SelectItem key={f.id} value={f.id}>{f.shortName} ({f.id})</SelectItem>
                         ))}
