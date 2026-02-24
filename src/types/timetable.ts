@@ -46,6 +46,7 @@ export interface ClassSession {
   yearNumber: number;
   subjectCode: string;
   facultyId: string;
+  secondFacultyId?: string;
   day: Day;
   slotIndex: number;
   isFixed: boolean;

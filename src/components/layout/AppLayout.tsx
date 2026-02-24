@@ -1,13 +1,14 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { Home, Database, Play, Eye, Download } from 'lucide-react';
+import { Home, Database, Play, Eye, Users, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { to: '/', icon: Home, label: 'Home' },
   { to: '/input', icon: Database, label: 'Input' },
   { to: '/generate', icon: Play, label: 'Generate' },
-  { to: '/view', icon: Eye, label: 'View' },
+  { to: '/view', icon: Eye, label: 'Section' },
+  { to: '/faculty-view', icon: Users, label: 'Faculty' },
   { to: '/export', icon: Download, label: 'Export' },
 ];
 
@@ -28,7 +29,7 @@ export default function AppLayout() {
         <Outlet />
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-card border-t flex justify-around py-1.5 z-50">
+      <nav className="fixed bottom-0 left-0 right-0 bg-card border-t flex justify-around py-1.5 z-50 overflow-x-auto">
         {navItems.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}

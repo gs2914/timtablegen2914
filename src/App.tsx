@@ -9,6 +9,7 @@ import Index from "./pages/Index";
 import DataInput from "./pages/DataInput";
 import Generate from "./pages/Generate";
 import ViewTimetable from "./pages/ViewTimetable";
+import FacultyTimetable from "./pages/FacultyTimetable";
 import ExportPage from "./pages/Export";
 import NotFound from "./pages/NotFound";
 
@@ -27,6 +28,7 @@ const App = () => (
               <Route path="/input" element={<DataInput />} />
               <Route path="/generate" element={<Generate />} />
               <Route path="/view" element={<ViewTimetable />} />
+              <Route path="/faculty-view" element={<FacultyTimetable />} />
               <Route path="/export" element={<ExportPage />} />
             </Route>
             <Route path="*" element={<NotFound />} />
