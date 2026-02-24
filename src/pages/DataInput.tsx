@@ -142,9 +142,18 @@ export default function DataInput() {
     });
   };
 
+  const hasGeneratedTimetable = !!data.generatedTimetable;
+
   return (
     <div className="p-4 space-y-4 animate-fade-in">
       <h1 className="text-xl font-bold">Data Input</h1>
+
+      {hasGeneratedTimetable && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-xs text-destructive">
+          <span className="font-semibold">⚠ Timetable already generated.</span>
+          <span>Any changes here will require re-generation.</span>
+        </div>
+      )}
 
       <Tabs defaultValue="faculty" className="w-full">
         <TabsList className="grid grid-cols-5 w-full">
