@@ -14,6 +14,7 @@ import {
 type Action =
   | { type: 'SET_FACULTY'; payload: Faculty[] }
   | { type: 'ADD_FACULTY'; payload: Faculty }
+  | { type: 'UPDATE_FACULTY'; payload: Faculty }
   | { type: 'REMOVE_FACULTY'; payload: string }
   | { type: 'SET_SUBJECTS'; payload: Subject[] }
   | { type: 'ADD_SUBJECT'; payload: Subject }
@@ -34,11 +35,12 @@ type Action =
 function reducer(state: TimetableData, action: Action): TimetableData {
   switch (action.type) {
     case 'SET_FACULTY': return { ...state, faculty: action.payload };
-    case 'ADD_FACULTY': return { ...state, faculty: [...state.faculty, action.payload] };
-    case 'REMOVE_FACULTY': return { ...state, faculty: state.faculty.filter(f => f.id !== action.payload) };
+    case 'ADD_FACULTY': return { ...state, faculty: [...state.faculty, action.payload], generatedTimetable: null };
+    case 'UPDATE_FACULTY': return { ...state, faculty: state.faculty.map(f => f.id === action.payload.id ? action.payload : f), generatedTimetable: null };
+    case 'REMOVE_FACULTY': return { ...state, faculty: state.faculty.filter(f => f.id !== action.payload), generatedTimetable: null };
     case 'SET_SUBJECTS': return { ...state, subjects: action.payload };
-    case 'ADD_SUBJECT': return { ...state, subjects: [...state.subjects, action.payload] };
-    case 'REMOVE_SUBJECT': return { ...state, subjects: state.subjects.filter(s => s.code !== action.payload) };
+    case 'ADD_SUBJECT': return { ...state, subjects: [...state.subjects, action.payload], generatedTimetable: null };
+    case 'REMOVE_SUBJECT': return { ...state, subjects: state.subjects.filter(s => s.code !== action.payload), generatedTimetable: null };
     case 'SET_SECTIONS': return { ...state, sections: action.payload };
     case 'ADD_SECTION': return { ...state, sections: [...state.sections, action.payload] };
     case 'REMOVE_SECTION': return { ...state, sections: state.sections.filter(s => s.id !== action.payload) };
