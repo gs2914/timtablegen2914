@@ -7,6 +7,8 @@ import {
   Day,
   SubjectType,
   FacultySectionMapping,
+  LabRoom,
+  LabRoomMapping,
 } from '@/types/timetable';
 import { ConstraintEngine } from './constraintEngine';
 import { TimeSlotManager, DAYS } from './timeSlotManager';
@@ -35,11 +37,7 @@ export interface GAResult {
   converged: boolean;
 }
 
-// Morning slots that MUST be filled (leisure rule)
 const MORNING_SLOTS = [0, 1];
-
-// Allowed leisure slots: 3 (12:10-13:10), 5 (15:00-16:00), 6 (16:00-17:00)
-const ALLOWED_LEISURE_SLOTS = [3, 5, 6];
 
 export class GeneticAlgorithm {
   private config: GAConfig;
@@ -50,6 +48,8 @@ export class GeneticAlgorithm {
   private fixedClasses: FixedClass[];
   private careerPathClasses: CareerPathClass[];
   private facultyMappings: FacultySectionMapping[];
+  private labRooms: LabRoom[];
+  private labRoomMappings: LabRoomMapping[];
   private subjectMap: Map<string, Subject>;
 
   constructor(
@@ -60,6 +60,8 @@ export class GeneticAlgorithm {
     fixedClasses: FixedClass[],
     careerPathClasses: CareerPathClass[],
     facultyMappings: FacultySectionMapping[],
+    labRooms: LabRoom[] = [],
+    labRoomMappings: LabRoomMapping[] = [],
     config?: Partial<GAConfig>
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -70,6 +72,8 @@ export class GeneticAlgorithm {
     this.fixedClasses = fixedClasses;
     this.careerPathClasses = careerPathClasses;
     this.facultyMappings = facultyMappings;
+    this.labRooms = labRooms;
+    this.labRoomMappings = labRoomMappings;
     this.subjectMap = new Map(subjects.map(s => [s.code, s]));
   }
 
@@ -132,6 +136,33 @@ export class GeneticAlgorithm {
     return population;
   }
 
+  /** Get the lab room ID for a subject+section from mappings */
+  private getLabRoomForSession(subjectCode: string, sectionId: string): string | undefined {
+    return this.labRoomMappings.find(
+      m => m.subjectCode === subjectCode && m.sectionId === sectionId
+    )?.labRoomId;
+  }
+
+  /** Check if a lab room is free at a given day+slot across all sessions */
+  private isLabRoomFree(sessions: ClassSession[], labRoomId: string, day: Day, slot: number): boolean {
+    return !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === slot);
+  }
+
+  /** Check if a faculty has a class in an adjacent slot (back-to-back prevention) */
+  private isFacultyBackToBack(sessions: ClassSession[], facultyId: string, day: Day, slot: number): boolean {
+    return sessions.some(s =>
+      s.facultyId === facultyId && s.day === day &&
+      this.timeSlotManager.areSlotsConsecutive(s.slotIndex, slot)
+    );
+  }
+
+  /** Check if a subject is already assigned to slot 0 on another day for this section */
+  private isFirstHourDuplicate(sessions: ClassSession[], sectionId: string, subjectCode: string): boolean {
+    return sessions.some(s =>
+      s.sectionId === sectionId && s.slotIndex === 0 && s.subjectCode === subjectCode
+    );
+  }
+
   private generateRandomChromosome(): Chromosome {
     const sessions: ClassSession[] = [];
     const facultySchedule = new Map<string, Set<string>>();
@@ -152,10 +183,15 @@ export class GeneticAlgorithm {
 
     const pickFaculty = (subject: Subject, sectionId: string, day: Day, slot: number): string | null => {
       const preAssigned = getAssignedFaculty(this.facultyMappings, subject.code, sectionId);
-      if (preAssigned) return isFacultyFree(preAssigned, day, slot) ? preAssigned : null;
+      if (preAssigned) {
+        if (isFacultyFree(preAssigned, day, slot) && !this.isFacultyBackToBack(sessions, preAssigned, day, slot))
+          return preAssigned;
+        return null;
+      }
       const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
       for (const fid of eligible) {
-        if (isFacultyFree(fid, day, slot)) return fid;
+        if (isFacultyFree(fid, day, slot) && !this.isFacultyBackToBack(sessions, fid, day, slot))
+          return fid;
       }
       return null;
     };
@@ -174,12 +210,14 @@ export class GeneticAlgorithm {
     // 2. Career path classes
     for (const cp of this.careerPathClasses) {
       const yearSections = this.sections.filter(s => s.yearNumber === cp.yearNumber);
+      const labRoomId = cp.slotType === 'lab' ? this.findLabRoomForCareerPath(cp, sessions) : undefined;
       for (const section of yearSections) {
         if (isSectionFree(section.id, cp.day, cp.slotIndex) && isFacultyFree(cp.facultyId, cp.day, cp.slotIndex)) {
           sessions.push({
             sectionId: section.id, yearNumber: cp.yearNumber,
             subjectCode: cp.subjectCode, facultyId: cp.facultyId,
             day: cp.day, slotIndex: cp.slotIndex, isFixed: false, isCareerPath: true,
+            labRoomId,
           });
           markSection(section.id, cp.day, cp.slotIndex);
         }
@@ -196,19 +234,23 @@ export class GeneticAlgorithm {
         let remaining = subject.weeklyHours - existingCount;
         if (remaining <= 0) continue;
 
+        const labRoomId = (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED)
+          ? this.getLabRoomForSession(subject.code, section.id)
+          : undefined;
+
         // Handle lab/integrated continuous slots
         if (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED) {
           const labHours = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
           if (labHours > 0) {
             const placed = this.placeConsecutive(
               sessions, section.id, section.yearNumber, subject, labHours,
-              isFacultyFree, isSectionFree, markFaculty, markSection
+              isFacultyFree, isSectionFree, markFaculty, markSection, labRoomId
             );
             remaining -= placed;
           }
         }
 
-        // For integrated subjects, track which day the lab is on to avoid theory on same day
+        // For integrated subjects, track which day the lab is on
         let labDay: Day | null = null;
         if (subject.subjectType === SubjectType.INTEGRATED) {
           const labSessions = sessions.filter(
@@ -222,9 +264,7 @@ export class GeneticAlgorithm {
           sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).map(s => s.day)
         );
 
-        // Prefer morning slots first (leisure rule: mornings must be occupied)
         const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
-        // For integrated subjects, prioritize days OTHER than lab day
         const sortedDays = subject.subjectType === SubjectType.INTEGRATED && labDay
           ? [...shuffledDays.filter(d => d !== labDay), ...shuffledDays.filter(d => d === labDay)]
           : shuffledDays;
@@ -233,9 +273,7 @@ export class GeneticAlgorithm {
           if (remaining <= 0) break;
           if (subject.subjectType === SubjectType.THEORY && daysUsed.has(day)) continue;
 
-          // For integrated theory on lab day: only after lunch (slot >= 4) and not adjacent to lab
           const slots = this.timeSlotManager.getValidSlots(day);
-          // Prefer morning slots to fill mornings first
           const prioritizedSlots = [...slots].sort((a, b) => {
             const aMorning = MORNING_SLOTS.includes(a.slotIndex) ? 0 : 1;
             const bMorning = MORNING_SLOTS.includes(b.slotIndex) ? 0 : 1;
@@ -246,9 +284,12 @@ export class GeneticAlgorithm {
             if (remaining <= 0) break;
             if (!isSectionFree(section.id, day, slot.slotIndex)) continue;
 
-            // Integrated theory on lab day: must be after lunch and not adjacent to lab
+            // First-hour diversity check
+            if (slot.slotIndex === 0 && this.isFirstHourDuplicate(sessions, section.id, subject.code)) continue;
+
+            // Integrated theory on lab day: must be after lunch and not adjacent
             if (subject.subjectType === SubjectType.INTEGRATED && day === labDay) {
-              if (slot.slotIndex < 4) continue; // Must be after lunch
+              if (slot.slotIndex < 4) continue;
               const labSlots = sessions
                 .filter(s => s.sectionId === section.id && s.subjectCode === subject.code && s.day === day)
                 .map(s => s.slotIndex);
@@ -278,6 +319,7 @@ export class GeneticAlgorithm {
             for (const slot of this.timeSlotManager.getValidSlots(day)) {
               if (remaining <= 0) break;
               if (!isSectionFree(section.id, day, slot.slotIndex)) continue;
+              if (slot.slotIndex === 0 && this.isFirstHourDuplicate(sessions, section.id, subject.code)) continue;
               const chosenFaculty = pickFaculty(subject, section.id, day, slot.slotIndex);
               if (!chosenFaculty) continue;
               sessions.push({
@@ -297,6 +339,18 @@ export class GeneticAlgorithm {
     return sessions;
   }
 
+  private findLabRoomForCareerPath(cp: CareerPathClass, sessions: ClassSession[]): string | undefined {
+    // Find a lab room that supports this subject and is free
+    const subject = this.subjectMap.get(cp.subjectCode);
+    if (!subject) return undefined;
+    for (const lab of this.labRooms) {
+      if (lab.subjectCodes.includes(cp.subjectCode) && this.isLabRoomFree(sessions, lab.id, cp.day, cp.slotIndex)) {
+        return lab.id;
+      }
+    }
+    return undefined;
+  }
+
   private placeConsecutive(
     sessions: ClassSession[], sectionId: string, yearNumber: number,
     subject: Subject, hours: number,
@@ -304,6 +358,7 @@ export class GeneticAlgorithm {
     isSectionFree: (s: string, d: Day, sl: number) => boolean,
     markFaculty: (f: string, d: Day, s: number) => void,
     markSection: (s: string, d: Day, sl: number) => void,
+    labRoomId?: string,
   ): number {
     const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
 
@@ -326,6 +381,14 @@ export class GeneticAlgorithm {
         }
         if (!ok) continue;
 
+        // Check lab room availability for all candidate slots
+        if (labRoomId) {
+          for (const c of candidates) {
+            if (!this.isLabRoomFree(sessions, labRoomId, day, c.slotIndex)) { ok = false; break; }
+          }
+          if (!ok) continue;
+        }
+
         const preAssigned = getAssignedFaculty(this.facultyMappings, subject.code, sectionId);
         let chosenFaculty: string | null = null;
         if (preAssigned) {
@@ -343,6 +406,7 @@ export class GeneticAlgorithm {
             sectionId, yearNumber, subjectCode: subject.code,
             facultyId: chosenFaculty, day, slotIndex: c.slotIndex,
             isFixed: false, isCareerPath: false,
+            labRoomId,
           });
           markFaculty(chosenFaculty, day, c.slotIndex);
           markSection(sectionId, day, c.slotIndex);

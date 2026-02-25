@@ -9,6 +9,46 @@ import { TimeSlotManager } from '@/core/timeSlotManager';
 import { ConstraintEngine } from '@/core/constraintEngine';
 import { GeneticAlgorithm, GAResult } from '@/core/geneticAlgorithm';
 import { buildFacultySectionMappings } from '@/core/facultySectionAssigner';
+import { Subject, SubjectType, LabRoomMapping } from '@/types/timetable';
+
+/** Build lab-room-to-section mappings for lab/integrated subjects before generation */
+function buildLabRoomMappings(
+  subjects: Subject[],
+  sections: { id: string; yearNumber: number }[],
+  labRooms: { id: string; subjectCodes: string[] }[],
+): LabRoomMapping[] {
+  const mappings: LabRoomMapping[] = [];
+  if (labRooms.length === 0) return mappings;
+
+  // Track lab room load for balanced assignment
+  const labLoad = new Map<string, number>();
+
+  for (const subject of subjects) {
+    if (subject.subjectType === SubjectType.THEORY) continue;
+
+    // Find eligible labs for this subject
+    const eligibleLabs = labRooms.filter(l => l.subjectCodes.includes(subject.code));
+    if (eligibleLabs.length === 0) continue;
+
+    const yearSections = sections.filter(s => s.yearNumber === subject.yearNumber);
+    for (const section of yearSections) {
+      // Pick the lab with the lowest current load
+      const sorted = [...eligibleLabs].sort((a, b) =>
+        (labLoad.get(a.id) || 0) - (labLoad.get(b.id) || 0)
+      );
+      const chosenLab = sorted[0];
+      mappings.push({
+        subjectCode: subject.code,
+        sectionId: section.id,
+        labRoomId: chosenLab.id,
+        yearNumber: subject.yearNumber,
+      });
+      labLoad.set(chosenLab.id, (labLoad.get(chosenLab.id) || 0) + 1);
+    }
+  }
+
+  return mappings;
+}
 
 export default function Generate() {
   const { data, dispatch } = useTimetable();
@@ -35,6 +75,13 @@ export default function Generate() {
       }
     }
 
+    // Validate career path years
+    for (const cp of data.careerPathClasses) {
+      if (cp.yearNumber < 3 || cp.yearNumber > 4) {
+        errs.push(`Career path ${cp.subjectCode} has invalid year ${cp.yearNumber} (must be 3 or 4)`);
+      }
+    }
+
     return errs;
   }, [data]);
 
@@ -49,21 +96,24 @@ export default function Generate() {
     setProgress(0);
     setResult(null);
 
-    // Run in setTimeout to allow UI to update
     setTimeout(() => {
       try {
         const tsm = new TimeSlotManager();
 
-        // Build immutable faculty-section mappings before scheduling
+        // Build immutable faculty-section mappings
         const mappings = buildFacultySectionMappings(data.subjects, data.sections);
         dispatch({ type: 'SET_FACULTY_SECTION_MAPPINGS', payload: mappings });
 
-        const ce = new ConstraintEngine(tsm, data.subjects, mappings);
+        // Build lab room mappings
+        const labMappings = buildLabRoomMappings(data.subjects, data.sections, data.labRooms);
+        dispatch({ type: 'SET_LAB_ROOM_MAPPINGS', payload: labMappings });
 
+        const ce = new ConstraintEngine(tsm, data.subjects, mappings, data.labRooms, labMappings);
 
         const ga = new GeneticAlgorithm(
           ce, tsm, data.subjects, data.sections,
-          data.fixedClasses, data.careerPathClasses, mappings
+          data.fixedClasses, data.careerPathClasses, mappings,
+          data.labRooms, labMappings,
         );
 
         const res = ga.run((gen, fitness) => {
@@ -116,7 +166,7 @@ export default function Generate() {
         </CardHeader>
         <CardContent className="text-xs text-muted-foreground space-y-1">
           <p>Faculty: {data.faculty.length} | Subjects: {data.subjects.length} | Sections: {data.sections.length}</p>
-          <p>Fixed: {data.fixedClasses.length} | Career Path: {data.careerPathClasses.length}</p>
+          <p>Fixed: {data.fixedClasses.length} | Career Path: {data.careerPathClasses.length} | Lab Rooms: {data.labRooms.length}</p>
         </CardContent>
       </Card>
 
@@ -128,11 +178,16 @@ export default function Generate() {
           <div className="text-xs text-muted-foreground">
             Population: 60 | Max Generations: 500 | Mutation Rate: 20%
           </div>
+          <div className="text-[10px] text-muted-foreground space-y-0.5">
+            <p className="font-semibold">Hard Constraints:</p>
+            <p>• No faculty conflicts • No back-to-back faculty classes • First-hour subject diversity</p>
+            <p>• Lab 2-hour continuity • Lab room clash prevention • Career path sync (Year 3–4 only)</p>
+          </div>
 
           {running && (
             <div className="space-y-2">
               <Progress value={progress} className="h-2" />
-              <p className="text-xs text-muted-foreground text-center">Optimizing... {Math.round(progress)}%</p>
+              <p className="text-xs text-muted-foreground text-center">Optimising... {Math.round(progress)}%</p>
             </div>
           )}
 
