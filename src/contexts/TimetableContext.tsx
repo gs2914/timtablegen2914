@@ -9,6 +9,8 @@ import {
   CareerPathClass,
   ClassSession,
   FacultySectionMapping,
+  LabRoom,
+  LabRoomMapping,
 } from '@/types/timetable';
 
 type Action =
@@ -28,6 +30,10 @@ type Action =
   | { type: 'SET_CAREER_CLASSES'; payload: CareerPathClass[] }
   | { type: 'ADD_CAREER_CLASS'; payload: CareerPathClass }
   | { type: 'REMOVE_CAREER_CLASS'; payload: number }
+  | { type: 'SET_LAB_ROOMS'; payload: LabRoom[] }
+  | { type: 'ADD_LAB_ROOM'; payload: LabRoom }
+  | { type: 'REMOVE_LAB_ROOM'; payload: string }
+  | { type: 'SET_LAB_ROOM_MAPPINGS'; payload: LabRoomMapping[] }
   | { type: 'SET_FACULTY_SECTION_MAPPINGS'; payload: FacultySectionMapping[] }
   | { type: 'SET_TIMETABLE'; payload: ClassSession[] | null }
   | { type: 'RESET' };
@@ -50,6 +56,10 @@ function reducer(state: TimetableData, action: Action): TimetableData {
     case 'SET_CAREER_CLASSES': return { ...state, careerPathClasses: action.payload };
     case 'ADD_CAREER_CLASS': return { ...state, careerPathClasses: [...state.careerPathClasses, action.payload] };
     case 'REMOVE_CAREER_CLASS': return { ...state, careerPathClasses: state.careerPathClasses.filter((_, i) => i !== action.payload) };
+    case 'SET_LAB_ROOMS': return { ...state, labRooms: action.payload };
+    case 'ADD_LAB_ROOM': return { ...state, labRooms: [...state.labRooms, action.payload], generatedTimetable: null };
+    case 'REMOVE_LAB_ROOM': return { ...state, labRooms: state.labRooms.filter(l => l.id !== action.payload), generatedTimetable: null };
+    case 'SET_LAB_ROOM_MAPPINGS': return { ...state, labRoomMappings: action.payload };
     case 'SET_FACULTY_SECTION_MAPPINGS': return { ...state, facultySectionMappings: action.payload };
     case 'SET_TIMETABLE': return { ...state, generatedTimetable: action.payload };
     case 'RESET': return INITIAL_DATA;
@@ -62,7 +72,16 @@ const STORAGE_KEY = 'cse-timetable-data';
 function loadData(): TimetableData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Ensure new fields exist for backwards compatibility
+      return {
+        ...INITIAL_DATA,
+        ...parsed,
+        labRooms: parsed.labRooms || [],
+        labRoomMappings: parsed.labRoomMappings || [],
+      };
+    }
   } catch { /* ignore */ }
   return INITIAL_DATA;
 }

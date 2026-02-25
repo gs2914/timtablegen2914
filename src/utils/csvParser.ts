@@ -92,8 +92,9 @@ export function parseCareerPathCSV(text: string): CareerPathClass[] {
   return rows.slice(start).filter(r => r.length >= 5).map((r) => ({
     subjectCode: r[0],
     facultyId: r[1],
-    yearNumber: parseInt(r[2], 10) || 1,
+    yearNumber: parseInt(r[2], 10) || 3,
     day: parseDay(r[3]),
     slotIndex: parseInt(r[4], 10) || 0,
+    slotType: (r[5]?.toLowerCase() === 'lab' ? 'lab' : 'theory') as 'theory' | 'lab',
   }));
 }

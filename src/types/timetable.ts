@@ -26,6 +26,7 @@ export interface Subject {
   subjectType: SubjectType;
   labHours: number;
   yearNumber: number;
+  labRoomId?: string; // Which lab room this subject requires
 }
 
 export interface Section {
@@ -51,6 +52,7 @@ export interface ClassSession {
   slotIndex: number;
   isFixed: boolean;
   isCareerPath: boolean;
+  labRoomId?: string; // Assigned lab room for this session
 }
 
 export interface FixedClass {
@@ -65,9 +67,25 @@ export interface FixedClass {
 export interface CareerPathClass {
   subjectCode: string;
   facultyId: string;
-  yearNumber: number;
+  yearNumber: number; // Must be 3 or 4
   day: Day;
   slotIndex: number;
+  slotType: 'theory' | 'lab'; // Whether this is a theory or lab career path session
+}
+
+export interface LabRoom {
+  id: string;
+  name: string;
+  capacity: number;
+  subjectCodes: string[]; // Subjects that can be conducted in this lab
+}
+
+/** Fixed lab-to-section mapping for a semester (decided before generation) */
+export interface LabRoomMapping {
+  subjectCode: string;
+  sectionId: string;
+  labRoomId: string;
+  yearNumber: number;
 }
 
 export interface FacultySectionMapping {
@@ -83,6 +101,8 @@ export interface TimetableData {
   sections: Section[];
   fixedClasses: FixedClass[];
   careerPathClasses: CareerPathClass[];
+  labRooms: LabRoom[];
+  labRoomMappings: LabRoomMapping[];
   facultySectionMappings: FacultySectionMapping[];
   generatedTimetable: ClassSession[] | null;
 }
@@ -93,6 +113,8 @@ export const INITIAL_DATA: TimetableData = {
   sections: [],
   fixedClasses: [],
   careerPathClasses: [],
+  labRooms: [],
+  labRoomMappings: [],
   facultySectionMappings: [],
   generatedTimetable: null,
 };

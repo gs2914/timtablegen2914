@@ -19,8 +19,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from '@/hooks/use-toast';
-import { Day, SubjectType, Faculty, Subject, Section, FixedClass, CareerPathClass } from '@/types/timetable';
+import { Day, SubjectType, Faculty, Subject, Section, FixedClass, CareerPathClass, LabRoom } from '@/types/timetable';
 import { parseFacultyCSV, parseSubjectCSV, parseSectionCSV, parseFixedClassCSV, parseCareerPathCSV } from '@/utils/csvParser';
 import { DAYS, SLOT_DEFINITIONS } from '@/core/timeSlotManager';
 
@@ -158,7 +159,6 @@ export default function DataInput() {
 
   const addFixed = () => {
     if (!fcSubject || !fcFaculty || !fcSection) return;
-    // Check faculty conflict
     const conflict = data.fixedClasses.find(
       (f) => f.facultyId === fcFaculty && f.day === fcDay && f.slotIndex === parseInt(fcSlot)
     );
@@ -178,19 +178,52 @@ export default function DataInput() {
   // Career path form
   const [cpSubject, setCpSubject] = useState('');
   const [cpFaculty, setCpFaculty] = useState('');
-  const [cpYear, setCpYear] = useState('1');
+  const [cpYear, setCpYear] = useState('3');
   const [cpDay, setCpDay] = useState<Day>(Day.MONDAY);
   const [cpSlot, setCpSlot] = useState('0');
+  const [cpSlotType, setCpSlotType] = useState<'theory' | 'lab'>('theory');
 
   const addCareer = () => {
     if (!cpSubject || !cpFaculty) return;
+    const yearNum = parseInt(cpYear);
+    if (yearNum < 3 || yearNum > 4) {
+      toast({ title: 'Career path is only allowed for 3rd and 4th year', variant: 'destructive' });
+      return;
+    }
     dispatch({
       type: 'ADD_CAREER_CLASS',
       payload: {
         subjectCode: cpSubject, facultyId: cpFaculty,
-        yearNumber: parseInt(cpYear), day: cpDay, slotIndex: parseInt(cpSlot),
+        yearNumber: yearNum, day: cpDay, slotIndex: parseInt(cpSlot),
+        slotType: cpSlotType,
       },
     });
+  };
+
+  // Lab room form
+  const [labId, setLabId] = useState('');
+  const [labName, setLabName] = useState('');
+  const [labCapacity, setLabCapacity] = useState('30');
+  const [labSubjects, setLabSubjects] = useState<string[]>([]);
+
+  const toggleLabSubject = (code: string) => {
+    setLabSubjects(prev =>
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+    );
+  };
+
+  const addLabRoom = () => {
+    if (!labId || !labName) return;
+    if (data.labRooms.find(l => l.id === labId)) {
+      toast({ title: 'Duplicate Lab ID', variant: 'destructive' });
+      return;
+    }
+    dispatch({
+      type: 'ADD_LAB_ROOM',
+      payload: { id: labId, name: labName, capacity: parseInt(labCapacity), subjectCodes: labSubjects },
+    });
+    setLabId(''); setLabName(''); setLabCapacity('30'); setLabSubjects([]);
+    toast({ title: 'Lab room added' });
   };
 
   const hasGeneratedTimetable = !!data.generatedTimetable;
@@ -207,10 +240,11 @@ export default function DataInput() {
       )}
 
       <Tabs defaultValue="faculty" className="w-full">
-        <TabsList className="grid grid-cols-5 w-full">
+        <TabsList className="grid grid-cols-6 w-full">
           <TabsTrigger value="faculty" className="text-xs">Faculty</TabsTrigger>
           <TabsTrigger value="subjects" className="text-xs">Subjects</TabsTrigger>
           <TabsTrigger value="sections" className="text-xs">Sections</TabsTrigger>
+          <TabsTrigger value="labs" className="text-xs">Labs</TabsTrigger>
           <TabsTrigger value="fixed" className="text-xs">Fixed</TabsTrigger>
           <TabsTrigger value="career" className="text-xs">Career</TabsTrigger>
         </TabsList>
@@ -369,6 +403,60 @@ export default function DataInput() {
           </Card>
         </TabsContent>
 
+        {/* LAB ROOMS */}
+        <TabsContent value="labs">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Lab Rooms ({data.labRooms.length})</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div><Label className="text-xs">Lab ID</Label><Input value={labId} onChange={(e) => setLabId(e.target.value)} placeholder="LAB-1" className="h-8 text-sm" /></div>
+                <div><Label className="text-xs">Lab Name</Label><Input value={labName} onChange={(e) => setLabName(e.target.value)} placeholder="CS Lab 1" className="h-8 text-sm" /></div>
+                <div><Label className="text-xs">Capacity</Label><Input type="number" value={labCapacity} onChange={(e) => setLabCapacity(e.target.value)} className="h-8 text-sm" /></div>
+              </div>
+              {data.subjects.filter(s => s.subjectType !== SubjectType.THEORY).length > 0 && (
+                <div>
+                  <Label className="text-xs">Subjects Assigned to This Lab</Label>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {data.subjects.filter(s => s.subjectType !== SubjectType.THEORY).map(s => (
+                      <Badge
+                        key={s.code}
+                        variant={labSubjects.includes(s.code) ? 'default' : 'outline'}
+                        className="text-[10px] cursor-pointer"
+                        onClick={() => toggleLabSubject(s.code)}
+                      >
+                        {s.code}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Button size="sm" onClick={addLabRoom} className="w-full"><Plus className="h-3 w-3 mr-1" /> Add Lab Room</Button>
+              <div className="space-y-1 mt-2 max-h-40 overflow-auto">
+                {data.labRooms.map((lab) => (
+                  <div key={lab.id} className="flex items-center justify-between p-2 bg-muted rounded text-xs">
+                    <div>
+                      <span className="font-semibold">{lab.name}</span>
+                      <span className="text-muted-foreground ml-1">({lab.id})</span>
+                      <span className="text-muted-foreground ml-1">Cap: {lab.capacity}</span>
+                      {lab.subjectCodes.length > 0 && (
+                        <Badge variant="secondary" className="ml-1 text-[10px]">{lab.subjectCodes.length} subjects</Badge>
+                      )}
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => dispatch({ type: 'REMOVE_LAB_ROOM', payload: lab.id })}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              {data.labRooms.length === 0 && (
+                <p className="text-[10px] text-muted-foreground">Add lab rooms to enable lab-aware scheduling. Each lab session will be assigned a specific room, and no two sessions can use the same room simultaneously.</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* FIXED CLASSES */}
         <TabsContent value="fixed">
           <Card>
@@ -452,6 +540,9 @@ export default function DataInput() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="p-2 rounded bg-muted/50 text-[10px] text-muted-foreground">
+                Career path classes are allowed only for <strong>3rd and 4th year</strong>. They are scheduled simultaneously across all sections of the selected year.
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label className="text-xs">Subject</Label>
@@ -469,7 +560,16 @@ export default function DataInput() {
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <div><Label className="text-xs">Year</Label><Input type="number" value={cpYear} onChange={(e) => setCpYear(e.target.value)} className="h-8 text-sm" /></div>
+                <div>
+                  <Label className="text-xs">Year</Label>
+                  <Select value={cpYear} onValueChange={setCpYear}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">3rd Year</SelectItem>
+                      <SelectItem value="4">4th Year</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label className="text-xs">Day</Label>
                   <Select value={cpDay} onValueChange={(v) => setCpDay(v as Day)}>
@@ -485,11 +585,27 @@ export default function DataInput() {
                   </Select>
                 </div>
               </div>
+              <div>
+                <Label className="text-xs">Slot Type</Label>
+                <RadioGroup value={cpSlotType} onValueChange={(v) => setCpSlotType(v as 'theory' | 'lab')} className="flex gap-4 mt-1">
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="theory" id="cp-theory" />
+                    <Label htmlFor="cp-theory" className="text-xs">Theory</Label>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <RadioGroupItem value="lab" id="cp-lab" />
+                    <Label htmlFor="cp-lab" className="text-xs">Lab</Label>
+                  </div>
+                </RadioGroup>
+              </div>
               <Button size="sm" onClick={addCareer} className="w-full"><Plus className="h-3 w-3 mr-1" /> Add Career Path</Button>
               <div className="space-y-1 mt-2 max-h-32 overflow-auto">
                 {data.careerPathClasses.map((cp, i) => (
                   <div key={i} className="flex items-center justify-between p-2 bg-muted rounded text-xs">
-                    <span>{cp.subjectCode} | Y{cp.yearNumber} | {cp.day.slice(0, 3)} Slot {cp.slotIndex}</span>
+                    <span>
+                      {cp.subjectCode} | Y{cp.yearNumber} | {cp.day.slice(0, 3)} Slot {cp.slotIndex}
+                      <Badge variant="outline" className="ml-1 text-[10px]">{cp.slotType}</Badge>
+                    </span>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => dispatch({ type: 'REMOVE_CAREER_CLASS', payload: i })}>
                       <Trash2 className="h-3 w-3" />
                     </Button>
