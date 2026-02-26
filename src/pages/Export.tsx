@@ -2,8 +2,9 @@ import React from 'react';
 import { useTimetable } from '@/contexts/TimetableContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { FileSpreadsheet, Printer, RotateCcw } from 'lucide-react';
+import { FileSpreadsheet, Printer, RotateCcw, Users } from 'lucide-react';
 import { exportToCSV, downloadFile, printTimetable } from '@/utils/exportUtils';
+import { exportFacultyToCSV } from '@/utils/facultyExportUtils';
 import { toast } from '@/hooks/use-toast';
 
 export default function ExportPage() {
@@ -20,7 +21,19 @@ export default function ExportPage() {
       faculty: data.faculty,
     });
     downloadFile(csv, 'timetable.csv', 'text/csv');
-    toast({ title: 'CSV exported' });
+    toast({ title: 'Section timetable CSV exported' });
+  };
+
+  const handleFacultyCSV = () => {
+    if (!data.generatedTimetable) return;
+    const csv = exportFacultyToCSV({
+      sessions: data.generatedTimetable,
+      faculty: data.faculty,
+      subjects: data.subjects,
+      sections: data.sections,
+    });
+    downloadFile(csv, 'faculty-timetable.csv', 'text/csv');
+    toast({ title: 'Faculty timetable CSV exported' });
   };
 
   const handlePrint = () => {
@@ -44,18 +57,35 @@ export default function ExportPage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Export Timetable</CardTitle>
+          <CardTitle className="text-sm">Export Section Timetable</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {!hasTable && (
             <p className="text-xs text-muted-foreground">Generate a timetable first to enable exports.</p>
           )}
           <Button onClick={handleCSV} disabled={!hasTable} className="w-full" variant="outline">
-            <FileSpreadsheet className="h-4 w-4 mr-2" /> Export as CSV
+            <FileSpreadsheet className="h-4 w-4 mr-2" /> Export Sections as CSV
           </Button>
           <Button onClick={handlePrint} disabled={!hasTable} className="w-full" variant="outline">
             <Printer className="h-4 w-4 mr-2" /> Print / Save as PDF
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Export Faculty Timetable</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!hasTable && (
+            <p className="text-xs text-muted-foreground">Generate a timetable first to enable exports.</p>
+          )}
+          <Button onClick={handleFacultyCSV} disabled={!hasTable} className="w-full" variant="outline">
+            <Users className="h-4 w-4 mr-2" /> Export Faculty Timetables as CSV
+          </Button>
+          <p className="text-[10px] text-muted-foreground">
+            Includes: Day, Time Slot, Subject Code, Section, LAB/THEORY indication for each faculty.
+          </p>
         </CardContent>
       </Card>
 

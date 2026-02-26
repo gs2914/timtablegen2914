@@ -66,6 +66,39 @@ export default function DataInput() {
   const [deleteFacOpen, setDeleteFacOpen] = useState(false);
   const [deleteFacId, setDeleteFacId] = useState<string | null>(null);
 
+  // Subject edit state
+  const [editSubOpen, setEditSubOpen] = useState(false);
+  const [editSub, setEditSub] = useState<Subject | null>(null);
+  const [editSubFaculty, setEditSubFaculty] = useState('');
+  const [editSubYear, setEditSubYear] = useState('1');
+  const [editSubName, setEditSubName] = useState('');
+
+  const openEditSubject = (s: Subject) => {
+    setEditSub(s);
+    setEditSubFaculty(s.facultyId);
+    setEditSubYear(String(s.yearNumber));
+    setEditSubName(s.name);
+    setEditSubOpen(true);
+  };
+
+  const saveEditSubject = () => {
+    if (!editSub) return;
+    const updatedEligible = editSub.eligibleFacultyIds.includes(editSubFaculty)
+      ? editSub.eligibleFacultyIds
+      : [editSubFaculty, ...editSub.eligibleFacultyIds.filter(f => f !== editSub.facultyId)];
+    dispatch({
+      type: 'UPDATE_SUBJECT',
+      payload: {
+        ...editSub,
+        name: editSubName.trim() || editSub.name,
+        facultyId: editSubFaculty,
+        yearNumber: parseInt(editSubYear),
+        eligibleFacultyIds: updatedEligible,
+      },
+    });
+    setEditSubOpen(false);
+    toast({ title: 'Subject updated' });
+  };
   const addFaculty = () => {
     if (!facId || !facName) return;
     if (data.faculty.find((f) => f.id === facId)) {
@@ -362,9 +395,14 @@ export default function DataInput() {
                         <Badge variant="secondary" className="ml-1 text-[10px]">{s.eligibleFacultyIds.length} faculty</Badge>
                       )}
                     </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => dispatch({ type: 'REMOVE_SUBJECT', payload: s.code })}>
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditSubject(s)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => dispatch({ type: 'REMOVE_SUBJECT', payload: s.code })}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -657,6 +695,41 @@ export default function DataInput() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Subject Edit Dialog */}
+      <Dialog open={editSubOpen} onOpenChange={setEditSubOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Subject: {editSub?.code}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Subject Name</Label>
+              <Input value={editSubName} onChange={e => setEditSubName(e.target.value)} className="h-8 text-sm" />
+            </div>
+            <div>
+              <Label className="text-xs">Assigned Faculty</Label>
+              <Select value={editSubFaculty} onValueChange={setEditSubFaculty}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {data.faculty.map(f => (
+                    <SelectItem key={f.id} value={f.id}>{f.shortName} ({f.id})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs">Year</Label>
+              <Input type="number" value={editSubYear} onChange={e => setEditSubYear(e.target.value)} min="1" max="4" className="h-8 text-sm" />
+            </div>
+            <p className="text-[10px] text-muted-foreground">Subject code cannot be changed. Faculty ID and year can be updated without deleting the subject.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditSubOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={saveEditSubject}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
