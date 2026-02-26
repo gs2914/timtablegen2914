@@ -80,30 +80,82 @@ export class ConstraintEngine {
     return violations;
   }
 
-  // ─── HARD: Faculty no back-to-back classes ─────────────────────
+  // ─── HARD: Faculty no back-to-back THEORY classes (labs allowed as 2-hr blocks) ───
   private checkFacultyBackToBack(sessions: ClassSession[]): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
-    // Group sessions by faculty+day
-    const facultyDaySlots = new Map<string, number[]>();
+
+    // Build a lookup: faculty+day+slot → session
+    const facultyDaySessions = new Map<string, ClassSession[]>();
     for (const session of sessions) {
       const key = `${session.facultyId}-${session.day}`;
-      if (!facultyDaySlots.has(key)) facultyDaySlots.set(key, []);
-      facultyDaySlots.get(key)!.push(session.slotIndex);
+      if (!facultyDaySessions.has(key)) facultyDaySessions.set(key, []);
+      facultyDaySessions.get(key)!.push(session);
     }
-    for (const [key, slots] of facultyDaySlots) {
-      const sorted = [...new Set(slots)].sort((a, b) => a - b);
-      for (let i = 1; i < sorted.length; i++) {
-        // Check if two slots are consecutive (back-to-back)
-        // Slots 3→4 cross lunch so they are NOT consecutive
-        if (this.timeSlotManager.areSlotsConsecutive(sorted[i - 1], sorted[i])) {
-          violations.push({
-            type: 'hard',
-            message: `Faculty back-to-back: ${key} slots ${sorted[i - 1]}-${sorted[i]}`,
-            penalty: 1000,
-          });
+
+    for (const [key, daySessions] of facultyDaySessions) {
+      const sorted = daySessions
+        .map(s => ({ slot: s.slotIndex, session: s }))
+        .sort((a, b) => a.slot - b.slot);
+
+      // Deduplicate by slot (shouldn't have dupes but be safe)
+      const unique: { slot: number; session: ClassSession }[] = [];
+      const seen = new Set<number>();
+      for (const entry of sorted) {
+        if (!seen.has(entry.slot)) { seen.add(entry.slot); unique.push(entry); }
+      }
+
+      for (let i = 1; i < unique.length; i++) {
+        const prev = unique[i - 1];
+        const curr = unique[i];
+
+        if (!this.timeSlotManager.areSlotsConsecutive(prev.slot, curr.slot)) continue;
+
+        // Both are part of the same lab subject → allowed (2-hr lab block)
+        const prevSubj = this.subjects.get(prev.session.subjectCode);
+        const currSubj = this.subjects.get(curr.session.subjectCode);
+        const prevIsLab = prevSubj && (prevSubj.subjectType === SubjectType.LAB || prevSubj.subjectType === SubjectType.INTEGRATED);
+        const currIsLab = currSubj && (currSubj.subjectType === SubjectType.LAB || currSubj.subjectType === SubjectType.INTEGRATED);
+
+        if (prevIsLab && currIsLab && prev.session.subjectCode === curr.session.subjectCode
+            && prev.session.sectionId === curr.session.sectionId) {
+          continue; // Valid 2-hr lab block
+        }
+
+        // Otherwise it's a violation
+        violations.push({
+          type: 'hard',
+          message: `Faculty back-to-back: ${key} slots ${prev.slot}-${curr.slot}`,
+          penalty: 1000,
+        });
+      }
+
+      // After a lab block, next slot must be free
+      // Find lab blocks and check the slot after the second lab hour
+      const slotSet = new Set(unique.map(u => u.slot));
+      for (let i = 0; i < unique.length - 1; i++) {
+        const a = unique[i];
+        const b = unique[i + 1];
+        const aSubj = this.subjects.get(a.session.subjectCode);
+        const bSubj = this.subjects.get(b.session.subjectCode);
+        const aIsLab = aSubj && (aSubj.subjectType === SubjectType.LAB || aSubj.subjectType === SubjectType.INTEGRATED);
+        const bIsLab = bSubj && (bSubj.subjectType === SubjectType.LAB || bSubj.subjectType === SubjectType.INTEGRATED);
+
+        if (aIsLab && bIsLab && a.session.subjectCode === b.session.subjectCode
+            && a.session.sectionId === b.session.sectionId
+            && this.timeSlotManager.areSlotsConsecutive(a.slot, b.slot)) {
+          // This is a lab block ending at b.slot. Check if there's a session in the next consecutive slot.
+          const nextEntry = unique.find(u => this.timeSlotManager.areSlotsConsecutive(b.slot, u.slot) && u.slot > b.slot);
+          if (nextEntry) {
+            violations.push({
+              type: 'hard',
+              message: `No free slot after lab: ${key} lab ends at slot ${b.slot}, next at ${nextEntry.slot}`,
+              penalty: 1000,
+            });
+          }
         }
       }
     }
+
     return violations;
   }
 

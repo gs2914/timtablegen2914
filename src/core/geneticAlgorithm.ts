@@ -148,12 +148,25 @@ export class GeneticAlgorithm {
     return !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === slot);
   }
 
-  /** Check if a faculty has a class in an adjacent slot (back-to-back prevention) */
-  private isFacultyBackToBack(sessions: ClassSession[], facultyId: string, day: Day, slot: number): boolean {
-    return sessions.some(s =>
-      s.facultyId === facultyId && s.day === day &&
-      this.timeSlotManager.areSlotsConsecutive(s.slotIndex, slot)
-    );
+  /** Check if a faculty has a back-to-back THEORY class (lab blocks are allowed) */
+  private isFacultyBackToBack(sessions: ClassSession[], facultyId: string, day: Day, slot: number, currentSubjectCode?: string, currentSectionId?: string): boolean {
+    return sessions.some(s => {
+      if (s.facultyId !== facultyId || s.day !== day) return false;
+      if (!this.timeSlotManager.areSlotsConsecutive(s.slotIndex, slot)) return false;
+
+      // If both are part of the same lab/integrated subject for the same section, allow it
+      if (currentSubjectCode && currentSectionId) {
+        const existingSubj = this.subjectMap.get(s.subjectCode);
+        const currentSubj = this.subjectMap.get(currentSubjectCode);
+        if (existingSubj && currentSubj
+            && s.subjectCode === currentSubjectCode && s.sectionId === currentSectionId
+            && (existingSubj.subjectType === SubjectType.LAB || existingSubj.subjectType === SubjectType.INTEGRATED)) {
+          return false; // Allow lab block
+        }
+      }
+
+      return true; // Violation
+    });
   }
 
   /** Check if a subject is already assigned to slot 0 on another day for this section */
@@ -184,13 +197,13 @@ export class GeneticAlgorithm {
     const pickFaculty = (subject: Subject, sectionId: string, day: Day, slot: number): string | null => {
       const preAssigned = getAssignedFaculty(this.facultyMappings, subject.code, sectionId);
       if (preAssigned) {
-        if (isFacultyFree(preAssigned, day, slot) && !this.isFacultyBackToBack(sessions, preAssigned, day, slot))
+        if (isFacultyFree(preAssigned, day, slot) && !this.isFacultyBackToBack(sessions, preAssigned, day, slot, subject.code, sectionId))
           return preAssigned;
         return null;
       }
       const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
       for (const fid of eligible) {
-        if (isFacultyFree(fid, day, slot) && !this.isFacultyBackToBack(sessions, fid, day, slot))
+        if (isFacultyFree(fid, day, slot) && !this.isFacultyBackToBack(sessions, fid, day, slot, subject.code, sectionId))
           return fid;
       }
       return null;

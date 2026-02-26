@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   TimetableData,
   INITIAL_DATA,
@@ -20,6 +22,7 @@ type Action =
   | { type: 'REMOVE_FACULTY'; payload: string }
   | { type: 'SET_SUBJECTS'; payload: Subject[] }
   | { type: 'ADD_SUBJECT'; payload: Subject }
+  | { type: 'UPDATE_SUBJECT'; payload: Subject }
   | { type: 'REMOVE_SUBJECT'; payload: string }
   | { type: 'SET_SECTIONS'; payload: Section[] }
   | { type: 'ADD_SECTION'; payload: Section }
@@ -36,6 +39,7 @@ type Action =
   | { type: 'SET_LAB_ROOM_MAPPINGS'; payload: LabRoomMapping[] }
   | { type: 'SET_FACULTY_SECTION_MAPPINGS'; payload: FacultySectionMapping[] }
   | { type: 'SET_TIMETABLE'; payload: ClassSession[] | null }
+  | { type: 'LOAD_ALL'; payload: TimetableData }
   | { type: 'RESET' };
 
 function reducer(state: TimetableData, action: Action): TimetableData {
@@ -46,6 +50,7 @@ function reducer(state: TimetableData, action: Action): TimetableData {
     case 'REMOVE_FACULTY': return { ...state, faculty: state.faculty.filter(f => f.id !== action.payload), generatedTimetable: null };
     case 'SET_SUBJECTS': return { ...state, subjects: action.payload };
     case 'ADD_SUBJECT': return { ...state, subjects: [...state.subjects, action.payload], generatedTimetable: null };
+    case 'UPDATE_SUBJECT': return { ...state, subjects: state.subjects.map(s => s.code === action.payload.code ? action.payload : s), generatedTimetable: null };
     case 'REMOVE_SUBJECT': return { ...state, subjects: state.subjects.filter(s => s.code !== action.payload), generatedTimetable: null };
     case 'SET_SECTIONS': return { ...state, sections: action.payload };
     case 'ADD_SECTION': return { ...state, sections: [...state.sections, action.payload] };
@@ -62,6 +67,7 @@ function reducer(state: TimetableData, action: Action): TimetableData {
     case 'SET_LAB_ROOM_MAPPINGS': return { ...state, labRoomMappings: action.payload };
     case 'SET_FACULTY_SECTION_MAPPINGS': return { ...state, facultySectionMappings: action.payload };
     case 'SET_TIMETABLE': return { ...state, generatedTimetable: action.payload };
+    case 'LOAD_ALL': return { ...INITIAL_DATA, ...action.payload };
     case 'RESET': return INITIAL_DATA;
     default: return state;
   }
@@ -69,12 +75,11 @@ function reducer(state: TimetableData, action: Action): TimetableData {
 
 const STORAGE_KEY = 'cse-timetable-data';
 
-function loadData(): TimetableData {
+function loadFromLocalStorage(): TimetableData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Ensure new fields exist for backwards compatibility
       return {
         ...INITIAL_DATA,
         ...parsed,
@@ -94,11 +99,64 @@ interface TimetableContextValue {
 const TimetableContext = createContext<TimetableContextValue | null>(null);
 
 export function TimetableProvider({ children }: { children: React.ReactNode }) {
-  const [data, dispatch] = useReducer(reducer, undefined, loadData);
+  const [data, dispatch] = useReducer(reducer, undefined, loadFromLocalStorage);
+  const { user } = useAuth();
+  const loadedRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Load data from Supabase when user logs in
+  useEffect(() => {
+    if (!user) {
+      loadedRef.current = false;
+      return;
+    }
+    if (loadedRef.current) return;
+
+    const loadFromSupabase = async () => {
+      try {
+        const { data: row } = await supabase
+          .from('user_timetable_data')
+          .select('data')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (row?.data && typeof row.data === 'object') {
+          dispatch({ type: 'LOAD_ALL', payload: { ...INITIAL_DATA, ...(row.data as any) } });
+        }
+        loadedRef.current = true;
+      } catch (err) {
+        console.error('Failed to load data from Supabase:', err);
+        loadedRef.current = true;
+      }
+    };
+
+    loadFromSupabase();
+  }, [user]);
+
+  // Save to localStorage always + debounced save to Supabase
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+
+    if (!user || !loadedRef.current) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        await supabase
+          .from('user_timetable_data')
+          .upsert(
+            { user_id: user.id, data: data as any, updated_at: new Date().toISOString() },
+            { onConflict: 'user_id' }
+          );
+      } catch (err) {
+        console.error('Failed to save data to Supabase:', err);
+      }
+    }, 2000);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [data, user]);
 
   return (
     <TimetableContext.Provider value={{ data, dispatch }}>
