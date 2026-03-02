@@ -350,6 +350,8 @@ export class ConstraintEngine {
   }
 
   // ─── HARD: Max 1 leisure (free) hour per day per section ────────
+  // Leisure must be afternoon only (slots 4,5) and max 1 per day.
+  // Leisure slots must NOT be consecutive (no 2-hour free block).
   private checkLeisureHourPlacement(sessions: ClassSession[]): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
     const sectionIds = [...new Set(sessions.map(s => s.sectionId))];
@@ -361,16 +363,50 @@ export class ConstraintEngine {
         if (!byDay.has(s.day)) byDay.set(s.day, new Set());
         byDay.get(s.day)!.add(s.slotIndex);
       }
+
+      const leisureDays: string[] = [];
+
       for (const [day, occupiedSlots] of byDay) {
         // Count free slots among the first 6 valid slots (exclude optional 7th)
         const validSlots = this.timeSlotManager.getValidSlots(day as Day).filter(s => s.slotIndex < 6);
-        const freeCount = validSlots.filter(s => !occupiedSlots.has(s.slotIndex)).length;
+        const freeSlots = validSlots.filter(s => !occupiedSlots.has(s.slotIndex));
+        const freeCount = freeSlots.length;
+
+        // Max 1 free hour per day
         if (freeCount > 1) {
           violations.push({
             type: 'hard',
             message: `Too many free hours (${freeCount}): ${sectionId} ${day}`,
             penalty: 1000 * (freeCount - 1),
           });
+        }
+
+        // Free hour must be in afternoon slots (4 or 5) only
+        if (freeCount >= 1) {
+          for (const fs of freeSlots) {
+            if (fs.slotIndex < 4) {
+              violations.push({
+                type: 'hard',
+                message: `Free hour in morning slot ${fs.slotIndex}: ${sectionId} ${day}`,
+                penalty: 1000,
+              });
+            }
+          }
+          leisureDays.push(day);
+        }
+
+        // No 2 consecutive free slots
+        if (freeCount >= 2) {
+          const freeIdxs = freeSlots.map(s => s.slotIndex).sort((a, b) => a - b);
+          for (let i = 1; i < freeIdxs.length; i++) {
+            if (this.timeSlotManager.areSlotsConsecutive(freeIdxs[i - 1], freeIdxs[i])) {
+              violations.push({
+                type: 'hard',
+                message: `Consecutive free hours: ${sectionId} ${day} slots ${freeIdxs[i-1]}-${freeIdxs[i]}`,
+                penalty: 1000,
+              });
+            }
+          }
         }
       }
     }

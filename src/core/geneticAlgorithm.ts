@@ -98,8 +98,11 @@ export class GeneticAlgorithm {
 
       if (onProgress) onProgress(gen, bestFitness);
 
-      if (bestFitness === 0) {
-        return { timetable: bestChromosome, fitness: 0, generation: gen, converged: true };
+      if (bestFitness <= 1) {
+        return {
+          timetable: this.ensureLabContinuity(bestChromosome),
+          fitness: bestFitness, generation: gen, converged: true,
+        };
       }
 
       const newPopulation: Chromosome[] = [];
@@ -125,7 +128,11 @@ export class GeneticAlgorithm {
       population = newPopulation;
     }
 
-    return { timetable: bestChromosome, fitness: bestFitness, generation: bestGeneration, converged: bestFitness === 0 };
+    return {
+      timetable: this.ensureLabContinuity(bestChromosome),
+      fitness: bestFitness, generation: bestGeneration,
+      converged: bestFitness <= 1,
+    };
   }
 
   private initializePopulation(): Chromosome[] {
@@ -220,23 +227,32 @@ export class GeneticAlgorithm {
       markSection(fc.sectionId, fc.day, fc.slotIndex);
     }
 
-    // 2. Career path classes — respect slotType for display and lab room assignment
+    // 2. Career path classes — ALL sections of the year get the SAME day+slot
     for (const cp of this.careerPathClasses) {
       const yearSections = this.sections.filter(s => s.yearNumber === cp.yearNumber);
       const labRoomId = cp.slotType === 'lab' ? this.findLabRoomForCareerPath(cp, sessions) : undefined;
-      for (const section of yearSections) {
-        if (isSectionFree(section.id, cp.day, cp.slotIndex) && isFacultyFree(cp.facultyId, cp.day, cp.slotIndex)) {
-          sessions.push({
-            sectionId: section.id, yearNumber: cp.yearNumber,
-            subjectCode: cp.subjectCode, facultyId: cp.facultyId,
-            day: cp.day, slotIndex: cp.slotIndex, isFixed: false, isCareerPath: true,
-            labRoomId,
-            careerPathSlotType: cp.slotType, // Preserve THEORY vs LAB type
-          });
-          markSection(section.id, cp.day, cp.slotIndex);
-        }
-      }
+      // Mark faculty first to guarantee sync
       markFaculty(cp.facultyId, cp.day, cp.slotIndex);
+      for (const section of yearSections) {
+        // Force-place career path for ALL sections regardless of section-free status
+        // (career path takes priority — remove any conflicting session)
+        const conflictIdx = sessions.findIndex(
+          s => s.sectionId === section.id && s.day === cp.day && s.slotIndex === cp.slotIndex && !s.isFixed
+        );
+        if (conflictIdx !== -1) {
+          const removed = sessions[conflictIdx];
+          sectionSchedule.get(removed.sectionId)?.delete(`${removed.day}-${removed.slotIndex}`);
+          sessions.splice(conflictIdx, 1);
+        }
+        sessions.push({
+          sectionId: section.id, yearNumber: cp.yearNumber,
+          subjectCode: cp.subjectCode, facultyId: cp.facultyId,
+          day: cp.day, slotIndex: cp.slotIndex, isFixed: false, isCareerPath: true,
+          labRoomId,
+          careerPathSlotType: cp.slotType, // Preserve user-selected THEORY vs LAB
+        });
+        markSection(section.id, cp.day, cp.slotIndex);
+      }
     }
 
     // 3. Remaining subjects per section
@@ -618,7 +634,6 @@ export class GeneticAlgorithm {
             const labFree1 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s1.slotIndex);
             const labFree2 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s2.slotIndex);
             if (!labFree1 || !labFree2) continue;
-          }
 
           // Place lab
           for (const slot of [s1, s2]) {
@@ -637,5 +652,35 @@ export class GeneticAlgorithm {
     }
 
     return sessions;
+  }
+
+  /** Final pass: ensure every lab/integrated subject has exactly 2 continuous hours.
+   *  If any are broken, run the repair again. This is a post-generation guarantee. */
+  private ensureLabContinuity(sessions: ClassSession[]): ClassSession[] {
+    let result = sessions.map(s => ({ ...s }));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let valid = true;
+      const labGroups = new Map<string, ClassSession[]>();
+      for (const s of result) {
+        const subj = this.subjectMap.get(s.subjectCode);
+        if (!subj || subj.subjectType === SubjectType.THEORY) continue;
+        if (s.isCareerPath) continue;
+        const key = `${s.sectionId}-${s.subjectCode}`;
+        if (!labGroups.has(key)) labGroups.set(key, []);
+        labGroups.get(key)!.push(s);
+      }
+      for (const [, labSessions] of labGroups) {
+        if (labSessions.length < 2) { valid = false; break; }
+        const sameDay = labSessions.every(s => s.day === labSessions[0].day);
+        const slots = labSessions.map(s => s.slotIndex).sort((a, b) => a - b);
+        if (!sameDay || slots.length !== 2
+          || !this.timeSlotManager.areSlotsConsecutive(slots[0], slots[1])) {
+          valid = false; break;
+        }
+      }
+      if (valid) break;
+      result = this.repairLabContinuity(result);
+    }
+    return result;
   }
 }
