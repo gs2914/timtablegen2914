@@ -151,7 +151,13 @@ export default function TimetableGrid({
                   const subj = subjects.find((s) => s.code === session.subjectCode);
                   const fac = faculty.find((f) => f.id === session.facultyId);
                   const fac2 = session.secondFacultyId ? faculty.find(f => f.id === session.secondFacultyId) : null;
-                  const isLab = subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED);
+                  // Determine display type for the badge
+                  const isLabDisplay = session.isCareerPath
+                    ? session.careerPathSlotType === 'lab'
+                    : subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED);
+                  const badgeLabel = session.isCareerPath
+                    ? (session.careerPathSlotType === 'lab' ? 'CP-LAB' : 'CP')
+                    : 'LAB';
                   return (
                     <td
                       key={i}
@@ -165,7 +171,8 @@ export default function TimetableGrid({
                       <div className="font-bold">{subj?.code || session.subjectCode}</div>
                       <div className="text-[10px] opacity-75">{fac?.shortName || session.facultyId}</div>
                       {fac2 && <div className="text-[9px] opacity-60">+{fac2.shortName}</div>}
-                      {isLab && <Badge variant="outline" className="text-[8px] mt-0.5 px-1 py-0">LAB</Badge>}
+                      {session.isCareerPath && <Badge variant="outline" className="text-[8px] mt-0.5 px-1 py-0">{badgeLabel}</Badge>}
+                      {!session.isCareerPath && isLabDisplay && <Badge variant="outline" className="text-[8px] mt-0.5 px-1 py-0">LAB</Badge>}
                       {editable && !session.isFixed && (
                         <Pencil className="h-2.5 w-2.5 absolute top-1 right-1 opacity-0 group-hover:opacity-60 text-foreground" />
                       )}

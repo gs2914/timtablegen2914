@@ -1,4 +1,4 @@
-import { ClassSession, Subject, SubjectType, FacultySectionMapping, LabRoom, LabRoomMapping } from '@/types/timetable';
+import { ClassSession, Subject, SubjectType, Day, FacultySectionMapping, LabRoom, LabRoomMapping } from '@/types/timetable';
 import { TimeSlotManager } from './timeSlotManager';
 
 export interface ConstraintViolation {
@@ -349,11 +349,10 @@ export class ConstraintEngine {
     return violations;
   }
 
-  // ─── HARD: Leisure hours must not be in morning slots ──────────
+  // ─── HARD: Max 1 leisure (free) hour per day per section ────────
   private checkLeisureHourPlacement(sessions: ClassSession[]): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
     const sectionIds = [...new Set(sessions.map(s => s.sectionId))];
-    const morningSlots = [0, 1];
 
     for (const sectionId of sectionIds) {
       const sectionSessions = sessions.filter(s => s.sectionId === sectionId);
@@ -363,14 +362,15 @@ export class ConstraintEngine {
         byDay.get(s.day)!.add(s.slotIndex);
       }
       for (const [day, occupiedSlots] of byDay) {
-        for (const ms of morningSlots) {
-          if (this.timeSlotManager.isValidSlot(day as any, ms) && !occupiedSlots.has(ms)) {
-            violations.push({
-              type: 'hard',
-              message: `Morning free hour: ${sectionId} ${day} slot ${ms}`,
-              penalty: 1000,
-            });
-          }
+        // Count free slots among the first 6 valid slots (exclude optional 7th)
+        const validSlots = this.timeSlotManager.getValidSlots(day as Day).filter(s => s.slotIndex < 6);
+        const freeCount = validSlots.filter(s => !occupiedSlots.has(s.slotIndex)).length;
+        if (freeCount > 1) {
+          violations.push({
+            type: 'hard',
+            message: `Too many free hours (${freeCount}): ${sectionId} ${day}`,
+            penalty: 1000 * (freeCount - 1),
+          });
         }
       }
     }
