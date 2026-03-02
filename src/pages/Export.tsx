@@ -2,9 +2,10 @@ import React from 'react';
 import { useTimetable } from '@/contexts/TimetableContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { FileSpreadsheet, Printer, RotateCcw, Users } from 'lucide-react';
+import { FileSpreadsheet, Printer, RotateCcw, Users, FileText } from 'lucide-react';
 import { exportToCSV, downloadFile, printTimetable } from '@/utils/exportUtils';
 import { exportFacultyToCSV } from '@/utils/facultyExportUtils';
+import { exportFacultyTimetablePdf } from '@/utils/facultyPdfExport';
 import { toast } from '@/hooks/use-toast';
 
 export default function ExportPage() {
@@ -34,6 +35,17 @@ export default function ExportPage() {
     });
     downloadFile(csv, 'faculty-timetable.csv', 'text/csv');
     toast({ title: 'Faculty timetable CSV exported' });
+  };
+
+  const handleFacultyPdf = () => {
+    if (!data.generatedTimetable) return;
+    exportFacultyTimetablePdf({
+      sessions: data.generatedTimetable,
+      faculty: data.faculty,
+      subjects: data.subjects,
+      sections: data.sections,
+    });
+    toast({ title: 'Faculty timetable PDF opened for print' });
   };
 
   const handlePrint = () => {
@@ -83,8 +95,11 @@ export default function ExportPage() {
           <Button onClick={handleFacultyCSV} disabled={!hasTable} className="w-full" variant="outline">
             <Users className="h-4 w-4 mr-2" /> Export Faculty Timetables as CSV
           </Button>
+          <Button onClick={handleFacultyPdf} disabled={!hasTable} className="w-full" variant="outline">
+            <FileText className="h-4 w-4 mr-2" /> Print / Save Faculty PDF
+          </Button>
           <p className="text-[10px] text-muted-foreground">
-            Includes: Day, Time Slot, Subject Code, Section, LAB/THEORY indication for each faculty.
+            Includes: Day, Time Slot, Subject Code, Section, LAB/THEORY indication, Lunch break.
           </p>
         </CardContent>
       </Card>

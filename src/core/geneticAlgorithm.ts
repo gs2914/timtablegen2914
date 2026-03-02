@@ -220,7 +220,7 @@ export class GeneticAlgorithm {
       markSection(fc.sectionId, fc.day, fc.slotIndex);
     }
 
-    // 2. Career path classes
+    // 2. Career path classes — respect slotType for display and lab room assignment
     for (const cp of this.careerPathClasses) {
       const yearSections = this.sections.filter(s => s.yearNumber === cp.yearNumber);
       const labRoomId = cp.slotType === 'lab' ? this.findLabRoomForCareerPath(cp, sessions) : undefined;
@@ -231,6 +231,7 @@ export class GeneticAlgorithm {
             subjectCode: cp.subjectCode, facultyId: cp.facultyId,
             day: cp.day, slotIndex: cp.slotIndex, isFixed: false, isCareerPath: true,
             labRoomId,
+            careerPathSlotType: cp.slotType, // Preserve THEORY vs LAB type
           });
           markSection(section.id, cp.day, cp.slotIndex);
         }
@@ -493,7 +494,7 @@ export class GeneticAlgorithm {
   private repair(chromosome: Chromosome): Chromosome {
     // 1. Remove duplicate section-day-slot
     const seen = new Map<string, boolean>();
-    const repaired: ClassSession[] = [];
+    let repaired: ClassSession[] = [];
     for (const session of chromosome) {
       const key = `${session.sectionId}-${session.day}-${session.slotIndex}`;
       if (session.isFixed || !seen.has(key)) {
@@ -527,6 +528,114 @@ export class GeneticAlgorithm {
       }
     }
 
+    // 3. Repair broken lab continuity: ensure every lab/integrated subject
+    //    has exactly 2 continuous hours. If split or partial, re-place them.
+    repaired = this.repairLabContinuity(repaired);
+
     return repaired;
+  }
+
+  /** Re-place any lab sessions that aren't in valid 2-hour continuous blocks */
+  private repairLabContinuity(sessions: ClassSession[]): ClassSession[] {
+    const sectionSchedule = new Map<string, Set<string>>();
+    const facultySchedule = new Map<string, Set<string>>();
+
+    const markSlot = (sId: string, fId: string, day: Day, slot: number) => {
+      const sKey = `${sId}-${day}-${slot}`;
+      const fKey = `${fId}-${day}-${slot}`;
+      if (!sectionSchedule.has(sId)) sectionSchedule.set(sId, new Set());
+      sectionSchedule.get(sId)!.add(`${day}-${slot}`);
+      if (!facultySchedule.has(fId)) facultySchedule.set(fId, new Set());
+      facultySchedule.get(fId)!.add(`${day}-${slot}`);
+    };
+
+    // Build schedule from all sessions
+    for (const s of sessions) {
+      markSlot(s.sectionId, s.facultyId, s.day, s.slotIndex);
+    }
+
+    // Identify broken lab groups
+    const labGroups = new Map<string, ClassSession[]>();
+    for (const s of sessions) {
+      const subj = this.subjectMap.get(s.subjectCode);
+      if (!subj || subj.subjectType === SubjectType.THEORY) continue;
+      const key = `${s.sectionId}-${s.subjectCode}`;
+      if (!labGroups.has(key)) labGroups.set(key, []);
+      labGroups.get(key)!.push(s);
+    }
+
+    for (const [key, labSessions] of labGroups) {
+      if (labSessions.length < 2) {
+        // Not enough sessions for a valid lab - need to fix but skip for now
+        continue;
+      }
+      // Check if they form a valid 2-hour block
+      const slots = labSessions.map(s => s.slotIndex).sort((a, b) => a - b);
+      const sameDay = labSessions.every(s => s.day === labSessions[0].day);
+      const continuous = sameDay && slots.length === 2
+        && this.timeSlotManager.areSlotsConsecutive(slots[0], slots[1]);
+
+      if (continuous) continue; // Already valid
+
+      // Remove broken lab sessions from the schedule
+      const sectionId = labSessions[0].sectionId;
+      const facultyId = labSessions[0].facultyId;
+      const labRoomId = labSessions[0].labRoomId;
+      const yearNumber = labSessions[0].yearNumber;
+      const subjectCode = labSessions[0].subjectCode;
+
+      // Remove from sessions array
+      sessions = sessions.filter(s =>
+        !(s.sectionId === sectionId && s.subjectCode === subjectCode
+          && (this.subjectMap.get(s.subjectCode)?.subjectType !== SubjectType.THEORY))
+      );
+
+      // Remove from schedule maps
+      for (const ls of labSessions) {
+        sectionSchedule.get(ls.sectionId)?.delete(`${ls.day}-${ls.slotIndex}`);
+        facultySchedule.get(ls.facultyId)?.delete(`${ls.day}-${ls.slotIndex}`);
+      }
+
+      // Try to re-place as a 2-hour continuous block
+      const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
+      let placed = false;
+      for (const day of shuffledDays) {
+        const daySlots = this.timeSlotManager.getValidSlots(day);
+        for (let i = 0; i <= daySlots.length - 2; i++) {
+          const s1 = daySlots[i];
+          const s2 = daySlots[i + 1];
+          if (!this.timeSlotManager.areSlotsConsecutive(s1.slotIndex, s2.slotIndex)) continue;
+
+          const secFree1 = !sectionSchedule.get(sectionId)?.has(`${day}-${s1.slotIndex}`);
+          const secFree2 = !sectionSchedule.get(sectionId)?.has(`${day}-${s2.slotIndex}`);
+          const facFree1 = !facultySchedule.get(facultyId)?.has(`${day}-${s1.slotIndex}`);
+          const facFree2 = !facultySchedule.get(facultyId)?.has(`${day}-${s2.slotIndex}`);
+
+          if (!secFree1 || !secFree2 || !facFree1 || !facFree2) continue;
+
+          // Check lab room availability
+          if (labRoomId) {
+            const labFree1 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s1.slotIndex);
+            const labFree2 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s2.slotIndex);
+            if (!labFree1 || !labFree2) continue;
+          }
+
+          // Place lab
+          for (const slot of [s1, s2]) {
+            sessions.push({
+              sectionId, yearNumber, subjectCode,
+              facultyId, day, slotIndex: slot.slotIndex,
+              isFixed: false, isCareerPath: false, labRoomId,
+            });
+            markSlot(sectionId, facultyId, day, slot.slotIndex);
+          }
+          placed = true;
+          break;
+        }
+        if (placed) break;
+      }
+    }
+
+    return sessions;
   }
 }

@@ -53,6 +53,7 @@ export interface ClassSession {
   isFixed: boolean;
   isCareerPath: boolean;
   labRoomId?: string; // Assigned lab room for this session
+  careerPathSlotType?: 'theory' | 'lab'; // Preserves the user-selected type for career path display
 }
 
 export interface FixedClass {
