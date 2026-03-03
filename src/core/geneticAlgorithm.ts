@@ -634,6 +634,7 @@ export class GeneticAlgorithm {
             const labFree1 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s1.slotIndex);
             const labFree2 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s2.slotIndex);
             if (!labFree1 || !labFree2) continue;
+          }
 
           // Place lab
           for (const slot of [s1, s2]) {
