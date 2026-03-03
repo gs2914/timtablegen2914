@@ -39,6 +39,27 @@ export interface GAResult {
 
 const MORNING_SLOTS = [0, 1];
 
+/** Seeded PRNG (mulberry32) for deterministic output */
+function createSeededRandom(seed: number): () => number {
+  let t = seed | 0;
+  return () => {
+    t = (t + 0x6D2B79F5) | 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Deterministic shuffle using seeded random */
+function seededShuffle<T>(arr: T[], rand: () => number): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 export class GeneticAlgorithm {
   private config: GAConfig;
   private constraintEngine: ConstraintEngine;
@@ -51,6 +72,7 @@ export class GeneticAlgorithm {
   private labRooms: LabRoom[];
   private labRoomMappings: LabRoomMapping[];
   private subjectMap: Map<string, Subject>;
+  private rand: () => number;
 
   constructor(
     constraintEngine: ConstraintEngine,
@@ -75,6 +97,8 @@ export class GeneticAlgorithm {
     this.labRooms = labRooms;
     this.labRoomMappings = labRoomMappings;
     this.subjectMap = new Map(subjects.map(s => [s.code, s]));
+    // Fixed seed for deterministic output
+    this.rand = createSeededRandom(42);
   }
 
   run(onProgress?: (gen: number, bestFitness: number) => void): GAResult {
@@ -118,7 +142,7 @@ export class GeneticAlgorithm {
         const parent1 = this.tournamentSelect(population, fitnesses);
         const parent2 = this.tournamentSelect(population, fitnesses);
         let child = this.crossover(parent1, parent2);
-        if (Math.random() < this.config.mutationRate) {
+        if (this.rand() < this.config.mutationRate) {
           child = this.mutate(child);
         }
         child = this.repair(child);
@@ -208,7 +232,7 @@ export class GeneticAlgorithm {
           return preAssigned;
         return null;
       }
-      const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
+      const eligible = seededShuffle(subject.eligibleFacultyIds, this.rand);
       for (const fid of eligible) {
         if (isFacultyFree(fid, day, slot) && !this.isFacultyBackToBack(sessions, fid, day, slot, subject.code, sectionId))
           return fid;
@@ -294,7 +318,7 @@ export class GeneticAlgorithm {
           sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).map(s => s.day)
         );
 
-        const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
+        const shuffledDays = seededShuffle(DAYS, this.rand);
         const sortedDays = subject.subjectType === SubjectType.INTEGRATED && labDay
           ? [...shuffledDays.filter(d => d !== labDay), ...shuffledDays.filter(d => d === labDay)]
           : shuffledDays;
@@ -307,7 +331,7 @@ export class GeneticAlgorithm {
           const prioritizedSlots = [...slots].sort((a, b) => {
             const aMorning = MORNING_SLOTS.includes(a.slotIndex) ? 0 : 1;
             const bMorning = MORNING_SLOTS.includes(b.slotIndex) ? 0 : 1;
-            return aMorning - bMorning || (Math.random() - 0.5);
+            return aMorning - bMorning || (this.rand() - 0.5);
           });
 
           for (const slot of prioritizedSlots) {
@@ -390,7 +414,7 @@ export class GeneticAlgorithm {
     markSection: (s: string, d: Day, sl: number) => void,
     labRoomId?: string,
   ): number {
-    const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
+    const shuffledDays = seededShuffle(DAYS, this.rand);
 
     for (const day of shuffledDays) {
       const slots = this.timeSlotManager.getValidSlots(day);
@@ -424,7 +448,7 @@ export class GeneticAlgorithm {
         if (preAssigned) {
           if (candidates.every(c => isFacultyFree(preAssigned, day, c.slotIndex))) chosenFaculty = preAssigned;
         } else {
-          const eligible = [...subject.eligibleFacultyIds].sort(() => Math.random() - 0.5);
+          const eligible = seededShuffle(subject.eligibleFacultyIds, this.rand);
           for (const fid of eligible) {
             if (candidates.every(c => isFacultyFree(fid, day, c.slotIndex))) { chosenFaculty = fid; break; }
           }
@@ -448,9 +472,9 @@ export class GeneticAlgorithm {
   }
 
   private tournamentSelect(population: Chromosome[], fitnesses: number[]): Chromosome {
-    let bestIdx = Math.floor(Math.random() * population.length);
+    let bestIdx = Math.floor(this.rand() * population.length);
     for (let i = 0; i < 3; i++) {
-      const idx = Math.floor(Math.random() * population.length);
+      const idx = Math.floor(this.rand() * population.length);
       if (fitnesses[idx] < fitnesses[bestIdx]) bestIdx = idx;
     }
     return population[bestIdx].map((s) => ({ ...s }));
@@ -460,7 +484,7 @@ export class GeneticAlgorithm {
     const child: ClassSession[] = [];
     const sectionIds = [...new Set([...p1, ...p2].map((s) => s.sectionId))];
     for (const sid of sectionIds) {
-      const source = Math.random() < 0.5 ? p1 : p2;
+      const source = this.rand() < 0.5 ? p1 : p2;
       child.push(...source.filter((s) => s.sectionId === sid).map((s) => ({ ...s })));
     }
     return child;
@@ -470,14 +494,14 @@ export class GeneticAlgorithm {
     const mutable = chromosome.filter((s) => !s.isFixed && !s.isCareerPath);
     if (mutable.length === 0) return chromosome;
 
-    const session = mutable[Math.floor(Math.random() * mutable.length)];
+    const session = mutable[Math.floor(this.rand() * mutable.length)];
     const subject = this.subjectMap.get(session.subjectCode);
 
     // 50% chance: try to change faculty (only if not pre-assigned)
     const preAssigned = getAssignedFaculty(this.facultyMappings, session.subjectCode, session.sectionId);
-    if (!preAssigned && subject && subject.eligibleFacultyIds.length > 1 && Math.random() < 0.5) {
+    if (!preAssigned && subject && subject.eligibleFacultyIds.length > 1 && this.rand() < 0.5) {
       const otherFaculty = subject.eligibleFacultyIds.filter(f => f !== session.facultyId);
-      const shuffled = otherFaculty.sort(() => Math.random() - 0.5);
+      const shuffled = seededShuffle(otherFaculty, this.rand);
       for (const fid of shuffled) {
         const conflict = chromosome.some(
           s => s !== session && s.facultyId === fid && s.day === session.day && s.slotIndex === session.slotIndex
@@ -490,9 +514,9 @@ export class GeneticAlgorithm {
     }
 
     // Otherwise mutate time slot — prefer non-morning-empty moves
-    const days = [...DAYS].sort(() => Math.random() - 0.5);
+    const days = seededShuffle(DAYS, this.rand);
     for (const day of days) {
-      const slots = this.timeSlotManager.getValidSlots(day).sort(() => Math.random() - 0.5);
+      const slots = seededShuffle(this.timeSlotManager.getValidSlots(day), this.rand);
       for (const slot of slots) {
         const occupied = chromosome.some(
           s => s !== session && s.sectionId === session.sectionId && s.day === day && s.slotIndex === slot.slotIndex
@@ -613,7 +637,7 @@ export class GeneticAlgorithm {
       }
 
       // Try to re-place as a 2-hour continuous block
-      const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5);
+      const shuffledDays = seededShuffle(DAYS, this.rand);
       let placed = false;
       for (const day of shuffledDays) {
         const daySlots = this.timeSlotManager.getValidSlots(day);
