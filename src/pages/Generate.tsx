@@ -181,7 +181,8 @@ export default function Generate() {
           <div className="text-[10px] text-muted-foreground space-y-0.5">
             <p className="font-semibold">Hard Constraints:</p>
             <p>• No faculty conflicts • No back-to-back faculty classes • First-hour subject diversity</p>
-            <p>• Lab 2-hour continuity • Lab room clash prevention • Career path sync (Year 3–4 only)</p>
+            <p>• Lab 2-hour continuity • Lab room clash prevention • Career path sync (year-specific)</p>
+            <p>• No leisure in first period • No leisure after lunch</p>
           </div>
 
           {running && (
