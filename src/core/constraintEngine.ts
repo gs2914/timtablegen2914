@@ -470,6 +470,18 @@ export class ConstraintEngine {
       }
     }
 
+    // Excessive leisure: penalize if a section has more than 1 free period per day
+    // (excluding slot 6 which is optional)
+    for (const [key, slots] of sectionDaySlots) {
+      const [sectionId, day] = key.split('-');
+      const maxSlots = 6; // slots 0-5 are standard
+      const occupiedCount = slots.length;
+      const freeCount = maxSlots - occupiedCount;
+      if (freeCount > 1) {
+        violations.push({ type: 'soft', message: `Excessive leisure: ${key} (${freeCount} free)`, penalty: 15 * (freeCount - 1) });
+      }
+    }
+
     // Workload balancing
     const subjectFacultyLoad = new Map<string, Map<string, number>>();
     for (const session of sessions) {
