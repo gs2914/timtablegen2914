@@ -367,7 +367,44 @@ export class GeneticAlgorithm {
           }
         }
 
-        // Fill any remaining in any available slot
+        // Fill any remaining — for lab/integrated that failed placeConsecutive, retry
+        if (remaining > 0 && (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED)) {
+          const labHoursNeeded = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
+          const labRoomIdRetry = (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED)
+            ? this.getLabRoomForSession(subject.code, section.id) : undefined;
+          if (labHoursNeeded > 0) {
+            // Try all day+slot combinations more aggressively
+            for (const day of DAYS) {
+              const slots = this.timeSlotManager.getValidSlots(day);
+              for (let i = 0; i <= slots.length - 2; i++) {
+                const s1 = slots[i], s2 = slots[i + 1];
+                if (!this.timeSlotManager.areSlotsConsecutive(s1.slotIndex, s2.slotIndex)) continue;
+                if (!isSectionFree(section.id, day, s1.slotIndex) || !isSectionFree(section.id, day, s2.slotIndex)) continue;
+                if (labRoomIdRetry && (!this.isLabRoomFree(sessions, labRoomIdRetry, day, s1.slotIndex) || !this.isLabRoomFree(sessions, labRoomIdRetry, day, s2.slotIndex))) continue;
+                const fac = pickFaculty(subject, section.id, day, s1.slotIndex);
+                if (!fac) continue;
+                if (!isFacultyFree(fac, day, s2.slotIndex)) continue;
+                for (const sl of [s1, s2]) {
+                  sessions.push({
+                    sectionId: section.id, yearNumber: section.yearNumber,
+                    subjectCode: subject.code, facultyId: fac,
+                    day, slotIndex: sl.slotIndex, isFixed: false, isCareerPath: false,
+                    labRoomId: labRoomIdRetry,
+                  });
+                  markFaculty(fac, day, sl.slotIndex);
+                  markSection(section.id, day, sl.slotIndex);
+                  remaining--;
+                }
+                break;
+              }
+              if (remaining <= labHoursNeeded - 2) break;
+            }
+            // Adjust remaining for theory portion of integrated
+            remaining = subject.weeklyHours - sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).length;
+          }
+        }
+
+        // Fill any remaining theory hours in any available slot
         if (remaining > 0) {
           for (const day of DAYS) {
             for (const slot of this.timeSlotManager.getValidSlots(day)) {
@@ -483,9 +520,20 @@ export class GeneticAlgorithm {
   private crossover(p1: Chromosome, p2: Chromosome): Chromosome {
     const child: ClassSession[] = [];
     const sectionIds = [...new Set([...p1, ...p2].map((s) => s.sectionId))];
+
+    // 1. Always take career path sessions from p1 to keep them synchronized
+    const cpSessions = p1.filter(s => s.isCareerPath).map(s => ({ ...s }));
+    const cpKeys = new Set(cpSessions.map(s => `${s.sectionId}-${s.day}-${s.slotIndex}`));
+    child.push(...cpSessions);
+
+    // 2. Crossover non-career-path sessions by section
     for (const sid of sectionIds) {
       const source = this.rand() < 0.5 ? p1 : p2;
-      child.push(...source.filter((s) => s.sectionId === sid).map((s) => ({ ...s })));
+      const sectionSessions = source
+        .filter(s => s.sectionId === sid && !s.isCareerPath)
+        .map(s => ({ ...s }))
+        .filter(s => !cpKeys.has(`${s.sectionId}-${s.day}-${s.slotIndex}`));
+      child.push(...sectionSessions);
     }
     return child;
   }
@@ -532,12 +580,39 @@ export class GeneticAlgorithm {
   }
 
   private repair(chromosome: Chromosome): Chromosome {
+    // 0. Repair career path: ensure all sections of each year have the CP sessions
+    const cpByKey = new Map<string, ClassSession>();
+    for (const s of chromosome) {
+      if (!s.isCareerPath) continue;
+      const key = `${s.yearNumber}-${s.subjectCode}-${s.day}-${s.slotIndex}`;
+      if (!cpByKey.has(key)) cpByKey.set(key, s);
+    }
+    for (const [, cpRef] of cpByKey) {
+      const yearSections = this.sections.filter(s => s.yearNumber === cpRef.yearNumber);
+      for (const section of yearSections) {
+        const exists = chromosome.some(
+          s => s.isCareerPath && s.sectionId === section.id && s.subjectCode === cpRef.subjectCode
+            && s.day === cpRef.day && s.slotIndex === cpRef.slotIndex
+        );
+        if (!exists) {
+          // Remove any conflicting non-fixed session at this slot
+          chromosome = chromosome.filter(
+            s => !(s.sectionId === section.id && s.day === cpRef.day && s.slotIndex === cpRef.slotIndex && !s.isFixed)
+          );
+          chromosome.push({
+            ...cpRef,
+            sectionId: section.id,
+          });
+        }
+      }
+    }
+
     // 1. Remove duplicate section-day-slot
     const seen = new Map<string, boolean>();
     let repaired: ClassSession[] = [];
     for (const session of chromosome) {
       const key = `${session.sectionId}-${session.day}-${session.slotIndex}`;
-      if (session.isFixed || !seen.has(key)) {
+      if (session.isFixed || session.isCareerPath || !seen.has(key)) {
         seen.set(key, true);
         repaired.push(session);
       }
