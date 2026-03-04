@@ -113,7 +113,13 @@ export default function FacultyTimetable() {
                           }
                           const subj = data.subjects.find(s => s.code === session.subjectCode);
                           const section = data.sections.find(s => s.id === session.sectionId);
-                          const isLab = subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED);
+                          const isCareerLab = session.isCareerPath && session.careerPathSlotType === 'lab';
+                          const isLab = session.isCareerPath
+                            ? isCareerLab
+                            : !!(subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED));
+                          const typeLabel = session.isCareerPath
+                            ? (isCareerLab ? 'CP-LAB' : 'CP')
+                            : (isLab ? 'LAB' : null);
                           const isSecondFac = session.secondFacultyId === fac.id;
 
                           return (
@@ -128,7 +134,7 @@ export default function FacultyTimetable() {
                               <div className="text-[10px] opacity-75">
                                 Y{session.yearNumber}-{section?.name || session.sectionId}
                               </div>
-                              {isLab && <Badge variant="outline" className="text-[8px] mt-0.5">LAB</Badge>}
+                              {typeLabel && <Badge variant="outline" className="text-[8px] mt-0.5">{typeLabel}</Badge>}
                               {isSecondFac && <Badge variant="secondary" className="text-[8px] mt-0.5">2nd</Badge>}
                             </td>
                           );
