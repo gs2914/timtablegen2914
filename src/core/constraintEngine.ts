@@ -213,42 +213,69 @@ export class ConstraintEngine {
     return violations;
   }
 
-  // ─── HARD: Lab hours must be exactly 2 continuous slots ────────
   private checkLabContinuity(sessions: ClassSession[]): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
-    const groups = new Map<string, ClassSession[]>();
-    for (const session of sessions) {
-      const subject = this.subjects.get(session.subjectCode);
-      if (!subject || subject.subjectType === SubjectType.THEORY) continue;
-      const key = `${session.sectionId}-${session.subjectCode}-${session.day}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(session);
-    }
-    for (const [key, classes] of groups) {
-      if (classes.length > 1) {
-        const slots = classes.map((c) => c.slotIndex).sort((a, b) => a - b);
-        for (let i = 1; i < slots.length; i++) {
-          if (!this.timeSlotManager.areSlotsConsecutive(slots[i - 1], slots[i])) {
-            violations.push({ type: 'hard', message: `Lab not continuous: ${key}`, penalty: 1000 });
+
+    // Enforce exact 2-hour continuous blocks for LAB subjects
+    const labSubjects = [...this.subjects.values()].filter(s => s.subjectType === SubjectType.LAB);
+
+    for (const subject of labSubjects) {
+      const yearSectionIds = [...new Set(sessions
+        .filter(s => s.yearNumber === subject.yearNumber)
+        .map(s => s.sectionId))];
+
+      for (const sectionId of yearSectionIds) {
+        const labSessions = sessions
+          .filter(s => !s.isCareerPath && s.sectionId === sectionId && s.subjectCode === subject.code)
+          .sort((a, b) => a.day.localeCompare(b.day) || a.slotIndex - b.slotIndex);
+
+        if (labSessions.length !== subject.weeklyHours) {
+          violations.push({
+            type: 'hard',
+            message: `Lab hours mismatch: ${subject.code} in ${sectionId}`,
+            penalty: 1000,
+          });
+          continue;
+        }
+
+        if (labSessions.length % 2 !== 0) {
+          violations.push({
+            type: 'hard',
+            message: `Lab not in 2-hour blocks: ${subject.code} in ${sectionId}`,
+            penalty: 1000,
+          });
+          continue;
+        }
+
+        const byDay = new Map<Day, number[]>();
+        for (const session of labSessions) {
+          if (!byDay.has(session.day)) byDay.set(session.day, []);
+          byDay.get(session.day)!.push(session.slotIndex);
+        }
+
+        for (const [day, daySlots] of byDay) {
+          daySlots.sort((a, b) => a - b);
+          if (daySlots.length % 2 !== 0) {
+            violations.push({
+              type: 'hard',
+              message: `Odd lab count on ${day}: ${subject.code} in ${sectionId}`,
+              penalty: 1000,
+            });
+            continue;
+          }
+
+          for (let i = 0; i < daySlots.length; i += 2) {
+            const first = daySlots[i];
+            const second = daySlots[i + 1];
+            if (second === undefined || !this.timeSlotManager.areSlotsConsecutive(first, second)) {
+              violations.push({
+                type: 'hard',
+                message: `Lab not continuous: ${subject.code} in ${sectionId} on ${day}`,
+                penalty: 1000,
+              });
+            }
           }
         }
-      }
-    }
-
-    // Lab sessions for a subject appear on only one day
-    const subjectSectionDays = new Map<string, Set<string>>();
-    for (const session of sessions) {
-      const subject = this.subjects.get(session.subjectCode);
-      if (!subject || subject.subjectType === SubjectType.THEORY) continue;
-      const key = `${session.sectionId}-${session.subjectCode}`;
-      if (!subjectSectionDays.has(key)) subjectSectionDays.set(key, new Set());
-      subjectSectionDays.get(key)!.add(session.day);
-    }
-    for (const [key, days] of subjectSectionDays) {
-      const subCode = key.split('-').slice(1).join('-');
-      const subject = this.subjects.get(subCode);
-      if (subject && subject.subjectType === SubjectType.LAB && days.size > 1) {
-        violations.push({ type: 'hard', message: `Lab split across days: ${key}`, penalty: 1000 });
       }
     }
 
@@ -349,38 +376,45 @@ export class ConstraintEngine {
     return violations;
   }
 
-  // ─── HARD: Leisure placement rules ─────────────────────────────
-  // Rule 1: First period of the day (slot 0) cannot be free/leisure.
-  // Rule 2: Period immediately after lunch (slot 4) cannot be free/leisure.
+  // ─── LEISURE PLACEMENT RULES ──────────────────────────────────
+  // Rule 1: At most one leisure slot per day (if any)
+  // Rule 2: Leisure is allowed only in afternoon (2:00 PM onwards => slotIndex >= 4)
   private checkLeisureHourPlacement(sessions: ClassSession[]): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
     const sectionIds = [...new Set(sessions.map(s => s.sectionId))];
 
     for (const sectionId of sectionIds) {
       const sectionSessions = sessions.filter(s => s.sectionId === sectionId);
-      const byDay = new Map<string, Set<number>>();
+      const byDay = new Map<Day, Set<number>>();
+
       for (const s of sectionSessions) {
         if (!byDay.has(s.day)) byDay.set(s.day, new Set());
         byDay.get(s.day)!.add(s.slotIndex);
       }
 
+      // Only evaluate days that actually have classes (no forced leisure on empty days)
       for (const [day, occupiedSlots] of byDay) {
-        // Rule 1: Slot 0 (first period) must not be free
-        if (!occupiedSlots.has(0)) {
+        const validSlots = this.timeSlotManager.getValidSlots(day).map(s => s.slotIndex);
+        const leisureSlots = validSlots.filter(slot => !occupiedSlots.has(slot));
+
+        if (leisureSlots.length === 0) continue;
+
+        if (leisureSlots.length > 1) {
           violations.push({
             type: 'hard',
-            message: `First period is free: ${sectionId} ${day}`,
+            message: `Multiple leisure slots in a day: ${sectionId} ${day}`,
             penalty: 1000,
           });
         }
 
-        // Rule 2: Slot 4 (immediately after lunch) must not be free
-        if (!occupiedSlots.has(4)) {
-          violations.push({
-            type: 'hard',
-            message: `Post-lunch period is free: ${sectionId} ${day}`,
-            penalty: 1000,
-          });
+        for (const slot of leisureSlots) {
+          if (slot < 4) {
+            violations.push({
+              type: 'hard',
+              message: `Leisure outside afternoon window: ${sectionId} ${day} slot ${slot}`,
+              penalty: 1000,
+            });
+          }
         }
       }
     }
@@ -467,18 +501,6 @@ export class ConstraintEngine {
             violations.push({ type: 'soft', message: `Idle gap`, penalty: 3 * gap });
           }
         }
-      }
-    }
-
-    // Excessive leisure: penalize if a section has more than 1 free period per day
-    // (excluding slot 6 which is optional)
-    for (const [key, slots] of sectionDaySlots) {
-      const [sectionId, day] = key.split('-');
-      const maxSlots = 6; // slots 0-5 are standard
-      const occupiedCount = slots.length;
-      const freeCount = maxSlots - occupiedCount;
-      if (freeCount > 1) {
-        violations.push({ type: 'soft', message: `Excessive leisure: ${key} (${freeCount} free)`, penalty: 15 * (freeCount - 1) });
       }
     }
 

@@ -123,9 +123,13 @@ export class GeneticAlgorithm {
       if (onProgress) onProgress(gen, bestFitness);
 
       if (bestFitness <= 1) {
+        const finalTimetable = this.ensureLabContinuity(bestChromosome);
+        const finalFitness = this.constraintEngine.calculateFitness(finalTimetable);
         return {
-          timetable: this.ensureLabContinuity(bestChromosome),
-          fitness: bestFitness, generation: gen, converged: true,
+          timetable: finalTimetable,
+          fitness: finalFitness,
+          generation: gen,
+          converged: finalFitness <= 1,
         };
       }
 
@@ -152,10 +156,14 @@ export class GeneticAlgorithm {
       population = newPopulation;
     }
 
+    const finalTimetable = this.ensureLabContinuity(bestChromosome);
+    const finalFitness = this.constraintEngine.calculateFitness(finalTimetable);
+
     return {
-      timetable: this.ensureLabContinuity(bestChromosome),
-      fitness: bestFitness, generation: bestGeneration,
-      converged: bestFitness <= 1,
+      timetable: finalTimetable,
+      fitness: finalFitness,
+      generation: bestGeneration,
+      converged: finalFitness <= 1,
     };
   }
 
@@ -650,137 +658,189 @@ export class GeneticAlgorithm {
     return repaired;
   }
 
-  /** Re-place any lab sessions that aren't in valid 2-hour continuous blocks */
-  private repairLabContinuity(sessions: ClassSession[]): ClassSession[] {
-    const sectionSchedule = new Map<string, Set<string>>();
-    const facultySchedule = new Map<string, Set<string>>();
+  /** Validate LAB sessions are exactly in continuous 2-hour blocks for a section+subject */
+  private isValidLabScheduleForSubject(
+    sessions: ClassSession[],
+    sectionId: string,
+    subjectCode: string,
+    expectedHours: number,
+  ): boolean {
+    const labSessions = sessions.filter(
+      s => !s.isCareerPath && s.sectionId === sectionId && s.subjectCode === subjectCode
+    );
 
-    const markSlot = (sId: string, fId: string, day: Day, slot: number) => {
-      const sKey = `${sId}-${day}-${slot}`;
-      const fKey = `${fId}-${day}-${slot}`;
-      if (!sectionSchedule.has(sId)) sectionSchedule.set(sId, new Set());
-      sectionSchedule.get(sId)!.add(`${day}-${slot}`);
-      if (!facultySchedule.has(fId)) facultySchedule.set(fId, new Set());
-      facultySchedule.get(fId)!.add(`${day}-${slot}`);
-    };
+    if (labSessions.length !== expectedHours) return false;
+    if (labSessions.length % 2 !== 0) return false;
 
-    // Build schedule from all sessions
-    for (const s of sessions) {
-      markSlot(s.sectionId, s.facultyId, s.day, s.slotIndex);
+    const byDay = new Map<Day, number[]>();
+    for (const s of labSessions) {
+      if (!byDay.has(s.day)) byDay.set(s.day, []);
+      byDay.get(s.day)!.push(s.slotIndex);
     }
 
-    // Identify broken lab groups
-    const labGroups = new Map<string, ClassSession[]>();
-    for (const s of sessions) {
-      const subj = this.subjectMap.get(s.subjectCode);
-      if (!subj || subj.subjectType === SubjectType.THEORY) continue;
-      const key = `${s.sectionId}-${s.subjectCode}`;
-      if (!labGroups.has(key)) labGroups.set(key, []);
-      labGroups.get(key)!.push(s);
+    for (const [, daySlots] of byDay) {
+      daySlots.sort((a, b) => a - b);
+      if (daySlots.length % 2 !== 0) return false;
+      for (let i = 0; i < daySlots.length; i += 2) {
+        const first = daySlots[i];
+        const second = daySlots[i + 1];
+        if (second === undefined || !this.timeSlotManager.areSlotsConsecutive(first, second)) {
+          return false;
+        }
+      }
     }
 
-    for (const [key, labSessions] of labGroups) {
-      if (labSessions.length < 2) {
-        // Not enough sessions for a valid lab - need to fix but skip for now
-        continue;
-      }
-      // Check if they form a valid 2-hour block
-      const slots = labSessions.map(s => s.slotIndex).sort((a, b) => a - b);
-      const sameDay = labSessions.every(s => s.day === labSessions[0].day);
-      const continuous = sameDay && slots.length === 2
-        && this.timeSlotManager.areSlotsConsecutive(slots[0], slots[1]);
+    return true;
+  }
 
-      if (continuous) continue; // Already valid
+  /** Deterministic hard repair for a single LAB subject in a section */
+  private repairSingleLabSubject(
+    sessions: ClassSession[],
+    sectionId: string,
+    yearNumber: number,
+    subject: Subject,
+  ): ClassSession[] {
+    const original = sessions;
+    let repaired = sessions.filter(
+      s => !(s.sectionId === sectionId && s.subjectCode === subject.code && !s.isCareerPath)
+    );
 
-      // Remove broken lab sessions from the schedule
-      const sectionId = labSessions[0].sectionId;
-      const facultyId = labSessions[0].facultyId;
-      const labRoomId = labSessions[0].labRoomId;
-      const yearNumber = labSessions[0].yearNumber;
-      const subjectCode = labSessions[0].subjectCode;
+    const labRoomId = this.getLabRoomForSession(subject.code, sectionId);
+    const preAssigned = getAssignedFaculty(this.facultyMappings, subject.code, sectionId);
+    const facultyCandidates = preAssigned ? [preAssigned] : [...subject.eligibleFacultyIds];
+    const requiredPairs = Math.floor(subject.weeklyHours / 2);
 
-      // Remove from sessions array
-      sessions = sessions.filter(s =>
-        !(s.sectionId === sectionId && s.subjectCode === subjectCode
-          && (this.subjectMap.get(s.subjectCode)?.subjectType !== SubjectType.THEORY))
-      );
-
-      // Remove from schedule maps
-      for (const ls of labSessions) {
-        sectionSchedule.get(ls.sectionId)?.delete(`${ls.day}-${ls.slotIndex}`);
-        facultySchedule.get(ls.facultyId)?.delete(`${ls.day}-${ls.slotIndex}`);
-      }
-
-      // Try to re-place as a 2-hour continuous block
-      const shuffledDays = seededShuffle(DAYS, this.rand);
+    for (let pair = 0; pair < requiredPairs; pair++) {
       let placed = false;
-      for (const day of shuffledDays) {
+
+      for (const day of DAYS) {
         const daySlots = this.timeSlotManager.getValidSlots(day);
-        for (let i = 0; i <= daySlots.length - 2; i++) {
-          const s1 = daySlots[i];
-          const s2 = daySlots[i + 1];
-          if (!this.timeSlotManager.areSlotsConsecutive(s1.slotIndex, s2.slotIndex)) continue;
 
-          const secFree1 = !sectionSchedule.get(sectionId)?.has(`${day}-${s1.slotIndex}`);
-          const secFree2 = !sectionSchedule.get(sectionId)?.has(`${day}-${s2.slotIndex}`);
-          const facFree1 = !facultySchedule.get(facultyId)?.has(`${day}-${s1.slotIndex}`);
-          const facFree2 = !facultySchedule.get(facultyId)?.has(`${day}-${s2.slotIndex}`);
+        for (let i = 0; i < daySlots.length - 1; i++) {
+          const slotA = daySlots[i].slotIndex;
+          const slotB = daySlots[i + 1].slotIndex;
 
-          if (!secFree1 || !secFree2 || !facFree1 || !facFree2) continue;
+          if (!this.timeSlotManager.areSlotsConsecutive(slotA, slotB)) continue;
 
-          // Check lab room availability
+          const sectionBlocked = repaired.some(
+            s => s.sectionId === sectionId && s.day === day && (s.slotIndex === slotA || s.slotIndex === slotB)
+          );
+          if (sectionBlocked) continue;
+
           if (labRoomId) {
-            const labFree1 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s1.slotIndex);
-            const labFree2 = !sessions.some(s => s.labRoomId === labRoomId && s.day === day && s.slotIndex === s2.slotIndex);
-            if (!labFree1 || !labFree2) continue;
+            const labBlocked = repaired.some(
+              s => s.labRoomId === labRoomId && s.day === day && (s.slotIndex === slotA || s.slotIndex === slotB)
+            );
+            if (labBlocked) continue;
           }
 
-          // Place lab
-          for (const slot of [s1, s2]) {
-            sessions.push({
-              sectionId, yearNumber, subjectCode,
-              facultyId, day, slotIndex: slot.slotIndex,
-              isFixed: false, isCareerPath: false, labRoomId,
-            });
-            markSlot(sectionId, facultyId, day, slot.slotIndex);
+          let selectedFaculty: string | null = null;
+          for (const fid of facultyCandidates) {
+            const facultyBlocked = repaired.some(
+              s => s.facultyId === fid && s.day === day && (s.slotIndex === slotA || s.slotIndex === slotB)
+            );
+            if (facultyBlocked) continue;
+
+            // Avoid faculty adjacency to satisfy no back-to-back + post-lab-free expectations
+            const adjacentBefore = repaired.some(
+              s => s.facultyId === fid && s.day === day && this.timeSlotManager.areSlotsConsecutive(s.slotIndex, slotA)
+            );
+            const adjacentAfter = repaired.some(
+              s => s.facultyId === fid && s.day === day && this.timeSlotManager.areSlotsConsecutive(slotB, s.slotIndex)
+            );
+            if (adjacentBefore || adjacentAfter) continue;
+
+            selectedFaculty = fid;
+            break;
           }
+
+          if (!selectedFaculty) continue;
+
+          repaired.push({
+            sectionId,
+            yearNumber,
+            subjectCode: subject.code,
+            facultyId: selectedFaculty,
+            day,
+            slotIndex: slotA,
+            isFixed: false,
+            isCareerPath: false,
+            labRoomId,
+          });
+          repaired.push({
+            sectionId,
+            yearNumber,
+            subjectCode: subject.code,
+            facultyId: selectedFaculty,
+            day,
+            slotIndex: slotB,
+            isFixed: false,
+            isCareerPath: false,
+            labRoomId,
+          });
+
           placed = true;
           break;
         }
+
         if (placed) break;
       }
+
+      // If not placeable, keep original sessions instead of returning partial/broken replacement
+      if (!placed) return original;
     }
 
-    return sessions;
+    return repaired;
   }
 
-  /** Final pass: ensure every lab/integrated subject has exactly 2 continuous hours.
-   *  If any are broken, run the repair again. This is a post-generation guarantee. */
-  private ensureLabContinuity(sessions: ClassSession[]): ClassSession[] {
-    let result = sessions.map(s => ({ ...s }));
-    for (let attempt = 0; attempt < 3; attempt++) {
-      let valid = true;
-      const labGroups = new Map<string, ClassSession[]>();
-      for (const s of result) {
-        const subj = this.subjectMap.get(s.subjectCode);
-        if (!subj || subj.subjectType === SubjectType.THEORY) continue;
-        if (s.isCareerPath) continue;
-        const key = `${s.sectionId}-${s.subjectCode}`;
-        if (!labGroups.has(key)) labGroups.set(key, []);
-        labGroups.get(key)!.push(s);
-      }
-      for (const [, labSessions] of labGroups) {
-        if (labSessions.length < 2) { valid = false; break; }
-        const sameDay = labSessions.every(s => s.day === labSessions[0].day);
-        const slots = labSessions.map(s => s.slotIndex).sort((a, b) => a - b);
-        if (!sameDay || slots.length !== 2
-          || !this.timeSlotManager.areSlotsConsecutive(slots[0], slots[1])) {
-          valid = false; break;
+  /** Re-place LAB sessions that are missing/split/broken into valid 2-hour blocks */
+  private repairLabContinuity(sessions: ClassSession[]): ClassSession[] {
+    let repaired = sessions.map(s => ({ ...s }));
+
+    const labSubjects = this.subjects.filter(s => s.subjectType === SubjectType.LAB);
+
+    for (const section of this.sections) {
+      const sectionLabSubjects = labSubjects.filter(s => s.yearNumber === section.yearNumber);
+
+      for (const subject of sectionLabSubjects) {
+        const valid = this.isValidLabScheduleForSubject(
+          repaired,
+          section.id,
+          subject.code,
+          subject.weeklyHours,
+        );
+
+        if (!valid) {
+          repaired = this.repairSingleLabSubject(repaired, section.id, section.yearNumber, subject);
         }
       }
-      if (valid) break;
+    }
+
+    return repaired;
+  }
+
+  /** Final hard guarantee: LAB subjects must end as exact 2-hour continuous blocks */
+  private ensureLabContinuity(sessions: ClassSession[]): ClassSession[] {
+    let result = sessions.map(s => ({ ...s }));
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      let valid = true;
+
+      const labSubjects = this.subjects.filter(s => s.subjectType === SubjectType.LAB);
+      for (const section of this.sections) {
+        for (const subject of labSubjects.filter(s => s.yearNumber === section.yearNumber)) {
+          if (!this.isValidLabScheduleForSubject(result, section.id, subject.code, subject.weeklyHours)) {
+            valid = false;
+            break;
+          }
+        }
+        if (!valid) break;
+      }
+
+      if (valid) return result;
       result = this.repairLabContinuity(result);
     }
+
     return result;
   }
 }

@@ -28,7 +28,9 @@ export function exportFacultyToCSV({ sessions, faculty, subjects, sections }: Fa
         if (!session) return '""';
         const subj = subjects.find(s => s.code === session.subjectCode);
         const section = sections.find(s => s.id === session.sectionId);
-        const type = subj?.subjectType === SubjectType.LAB ? 'LAB'
+        const type = session.isCareerPath
+          ? (session.careerPathSlotType === 'lab' ? 'CP-LAB' : 'CP-THEORY')
+          : subj?.subjectType === SubjectType.LAB ? 'LAB'
           : subj?.subjectType === SubjectType.INTEGRATED ? 'INT'
           : 'THEORY';
         return `"${session.subjectCode} / Y${session.yearNumber}-${section?.name || session.sectionId} / ${type}"`;
