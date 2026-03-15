@@ -156,7 +156,7 @@ export class GeneticAlgorithm {
       population = newPopulation;
     }
 
-    const finalTimetable = this.ensureLabContinuity(bestChromosome);
+    const finalTimetable = this.repairLeisure(this.ensureLabContinuity(bestChromosome));
     const finalFitness = this.constraintEngine.calculateFitness(finalTimetable);
 
     return {
