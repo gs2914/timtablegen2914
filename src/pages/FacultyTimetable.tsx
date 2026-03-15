@@ -8,7 +8,9 @@ import { DAYS, SLOT_DEFINITIONS } from '@/core/timeSlotManager';
 import { cn } from '@/lib/utils';
 
 const DISPLAY_SLOTS = [
-  ...SLOT_DEFINITIONS.slice(0, 4),
+  ...SLOT_DEFINITIONS.slice(0, 2),
+  { slotIndex: -2, startTime: '11:00', endTime: '11:10' }, // Break
+  ...SLOT_DEFINITIONS.slice(2, 4),
   { slotIndex: -1, startTime: '13:10', endTime: '14:00' }, // Lunch
   ...SLOT_DEFINITIONS.slice(4, 6),
 ];
