@@ -158,14 +158,25 @@ export default function DataInput() {
 
   const addSubject = () => {
     if (!subCode || !subName || !subFaculty) return;
+    const theoryHrs = parseInt(subHours) || 0;
+    const labHrs = parseInt(subLabHours) || 0;
+    const totalHrs = theoryHrs + labHrs;
+    if (totalHrs <= 0) {
+      toast({ title: 'Total hours must be > 0', variant: 'destructive' });
+      return;
+    }
+    // Auto-determine type: lab only, theory only, or integrated (both)
+    let autoType = SubjectType.THEORY;
+    if (labHrs > 0 && theoryHrs === 0) autoType = SubjectType.LAB;
+    else if (labHrs > 0 && theoryHrs > 0) autoType = SubjectType.INTEGRATED;
     const eligibleFacultyIds = [...new Set([subFaculty, ...subEligibleFaculty])];
     dispatch({
       type: 'ADD_SUBJECT',
       payload: {
         code: subCode, name: subName, facultyId: subFaculty,
         eligibleFacultyIds,
-        weeklyHours: parseInt(subHours), subjectType: subType,
-        labHours: parseInt(subLabHours), yearNumber: parseInt(subYear),
+        weeklyHours: totalHrs, subjectType: autoType,
+        labHours: labHrs, yearNumber: parseInt(subYear),
       },
     });
     setSubCode(''); setSubName(''); setSubEligibleFaculty([]);

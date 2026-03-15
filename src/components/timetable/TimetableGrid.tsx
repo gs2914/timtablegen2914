@@ -36,11 +36,13 @@ export default function TimetableGrid({
 }: Props) {
   const sectionSessions = sessions.filter((s) => s.sectionId === section.id);
 
-  // Build display slots with lunch break inserted after slot 3
+  // Build display slots: 4 morning slots, break, lunch, 2 afternoon slots
   const displaySlots = [
-    ...SLOT_DEFINITIONS.slice(0, 4),
-    { slotIndex: -1, startTime: '13:10', endTime: '14:00' }, // Lunch
-    ...SLOT_DEFINITIONS.slice(4, 6),
+    ...SLOT_DEFINITIONS.slice(0, 2),                                       // 09-10, 10-11
+    { slotIndex: -2, startTime: '11:00', endTime: '11:10' },              // BREAK
+    ...SLOT_DEFINITIONS.slice(2, 4),                                       // 11:10-12:10, 12:10-13:10
+    { slotIndex: -1, startTime: '13:10', endTime: '14:00' },              // LUNCH
+    ...SLOT_DEFINITIONS.slice(4, 6),                                       // 14-15, 15-16
   ];
 
   const [editOpen, setEditOpen] = useState(false);
@@ -55,6 +57,29 @@ export default function TimetableGrid({
   const getColorClass = (subjectCode: string) => {
     const idx = subjects.findIndex((s) => s.code === subjectCode);
     return slotColors[idx % slotColors.length];
+  };
+
+  /** Determine if this session is a lab slot */
+  const isLabSession = (session: ClassSession): boolean => {
+    if (session.isCareerPath) return session.careerPathSlotType === 'lab';
+    const subj = subjects.find(s => s.code === session.subjectCode);
+    if (!subj) return false;
+    if (subj.subjectType === SubjectType.LAB) return true;
+    // For integrated: check if it's part of a 2-hour continuous block on same day
+    if (subj.subjectType === SubjectType.INTEGRATED) {
+      const sameDaySessions = sectionSessions.filter(
+        s => s.subjectCode === session.subjectCode && s.day === session.day
+      ).map(s => s.slotIndex).sort((a, b) => a - b);
+      // If there are consecutive slots, this is a lab pair
+      for (let i = 0; i < sameDaySessions.length - 1; i++) {
+        if (Math.abs(sameDaySessions[i] - sameDaySessions[i + 1]) === 1) {
+          if (sameDaySessions[i] === session.slotIndex || sameDaySessions[i + 1] === session.slotIndex) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   };
 
   const openEdit = (session: ClassSession) => {
@@ -76,7 +101,6 @@ export default function TimetableGrid({
       secondFacultyId: (editSecondFacultyId && editSecondFacultyId !== '__none__') ? editSecondFacultyId : undefined,
     };
 
-    // Validate second faculty clash
     if (editSecondFacultyId) {
       const clash = sessions.find(s =>
         s !== editTarget &&
@@ -89,7 +113,6 @@ export default function TimetableGrid({
       }
     }
 
-    // Validate with constraint engine
     const tsm = new TimeSlotManager();
     const ce = new ConstraintEngine(tsm, subjects, facultyMappings);
     const errors = ce.validateEdit(sessions, updated, editTarget);
@@ -122,11 +145,14 @@ export default function TimetableGrid({
                     'p-2 border font-semibold text-center',
                     s.slotIndex === -1
                       ? 'bg-accent text-accent-foreground'
+                      : s.slotIndex === -2
+                      ? 'bg-muted text-muted-foreground'
                       : 'bg-primary text-primary-foreground'
                   )}
                 >
                   {s.startTime}<br />{s.endTime}
                   {s.slotIndex === -1 && <><br /><span className="text-[9px]">LUNCH</span></>}
+                  {s.slotIndex === -2 && <><br /><span className="text-[9px]">BREAK</span></>}
                 </th>
               ))}
             </tr>
@@ -143,6 +169,13 @@ export default function TimetableGrid({
                       </td>
                     );
                   }
+                  if (slot.slotIndex === -2) {
+                    return (
+                      <td key={i} className="p-2 border text-center bg-muted/50 text-muted-foreground">
+                        <div className="font-semibold text-[10px]">BREAK</div>
+                      </td>
+                    );
+                  }
                   const session = getSession(day, slot.slotIndex);
                   if (!session)
                     return (
@@ -151,28 +184,27 @@ export default function TimetableGrid({
                   const subj = subjects.find((s) => s.code === session.subjectCode);
                   const fac = faculty.find((f) => f.id === session.facultyId);
                   const fac2 = session.secondFacultyId ? faculty.find(f => f.id === session.secondFacultyId) : null;
-                  // Determine display type for the badge
-                  const isLabDisplay = session.isCareerPath
-                    ? session.careerPathSlotType === 'lab'
-                    : subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED);
-                  const badgeLabel = session.isCareerPath
+                  const isLab = isLabSession(session);
+                  const typeLabel = isLab ? 'Lab' : 'Theory';
+                  const cpLabel = session.isCareerPath
                     ? (session.careerPathSlotType === 'lab' ? 'CP-LAB' : 'CP')
-                    : 'LAB';
+                    : null;
+
                   return (
                     <td
                       key={i}
                       className={cn(
                         'p-2 border text-center rounded-sm relative group',
-                        getColorClass(session.subjectCode),
+                        isLab ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary',
                         editable && !session.isFixed && 'cursor-pointer hover:ring-2 hover:ring-primary/50'
                       )}
                       onClick={() => openEdit(session)}
                     >
-                      <div className="font-bold">{subj?.code || session.subjectCode}</div>
+                      <div className="font-bold">{subj?.name || session.subjectCode}</div>
+                      <div className="text-[10px] opacity-80">({typeLabel})</div>
                       <div className="text-[10px] opacity-75">{fac?.shortName || session.facultyId}</div>
                       {fac2 && <div className="text-[9px] opacity-60">+{fac2.shortName}</div>}
-                      {session.isCareerPath && <Badge variant="outline" className="text-[8px] mt-0.5 px-1 py-0">{badgeLabel}</Badge>}
-                      {!session.isCareerPath && isLabDisplay && <Badge variant="outline" className="text-[8px] mt-0.5 px-1 py-0">LAB</Badge>}
+                      {cpLabel && <Badge variant="outline" className="text-[8px] mt-0.5 px-1 py-0">{cpLabel}</Badge>}
                       {editable && !session.isFixed && (
                         <Pencil className="h-2.5 w-2.5 absolute top-1 right-1 opacity-0 group-hover:opacity-60 text-foreground" />
                       )}
@@ -193,7 +225,7 @@ export default function TimetableGrid({
           </DialogHeader>
           {editTarget && (() => {
             const editSubj = subjects.find(s => s.code === editSubjectCode);
-            const isLabSession = editSubj && (editSubj.subjectType === SubjectType.LAB || editSubj.subjectType === SubjectType.INTEGRATED);
+            const isLabSess = editSubj && (editSubj.subjectType === SubjectType.LAB || editSubj.subjectType === SubjectType.INTEGRATED);
             return (
               <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
@@ -221,7 +253,7 @@ export default function TimetableGrid({
                     </SelectContent>
                   </Select>
                 </div>
-                {isLabSession && (
+                {isLabSess && (
                   <div>
                     <Label className="text-xs">Second Faculty (Lab, optional)</Label>
                     <Select value={editSecondFacultyId} onValueChange={setEditSecondFacultyId}>
