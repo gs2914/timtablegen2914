@@ -810,21 +810,25 @@ export class GeneticAlgorithm {
     return repaired;
   }
 
-  /** Re-place LAB sessions that are missing/split/broken into valid 2-hour blocks */
+  /** Re-place LAB/INTEGRATED sessions that are missing/split/broken into valid 2-hour blocks */
   private repairLabContinuity(sessions: ClassSession[]): ClassSession[] {
     let repaired = sessions.map(s => ({ ...s }));
 
-    const labSubjects = this.subjects.filter(s => s.subjectType === SubjectType.LAB);
+    // Repair both LAB and INTEGRATED subjects
+    const labSubjects = this.subjects.filter(s => s.subjectType === SubjectType.LAB || s.subjectType === SubjectType.INTEGRATED);
 
     for (const section of this.sections) {
       const sectionLabSubjects = labSubjects.filter(s => s.yearNumber === section.yearNumber);
 
       for (const subject of sectionLabSubjects) {
+        const expectedLabHours = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
+        if (expectedLabHours <= 0 || expectedLabHours % 2 !== 0) continue;
+
         const valid = this.isValidLabScheduleForSubject(
           repaired,
           section.id,
           subject.code,
-          subject.weeklyHours,
+          expectedLabHours,
         );
 
         if (!valid) {
