@@ -287,43 +287,84 @@ export class GeneticAlgorithm {
       }
     }
 
-    // 3. Remaining subjects per section
-    for (const section of this.sections) {
-      const yearSubjects = this.subjects.filter(s => s.yearNumber === section.yearNumber);
+    // MANDATORY_SLOTS must always be filled (leisure NOT allowed here)
+    const MANDATORY_SLOTS = [0, 1, 2, 4];
 
+    // 3. Remaining subjects per section — process ALL sections uniformly
+    // Shuffle sections so no single section always gets priority
+    const shuffledSections = seededShuffle(this.sections, this.rand);
+
+    for (const section of shuffledSections) {
+      const yearSubjects = seededShuffle(
+        this.subjects.filter(s => s.yearNumber === section.yearNumber),
+        this.rand,
+      );
+
+      // --- Phase A: Place labs/integrated continuous blocks first ---
+      for (const subject of yearSubjects) {
+        if (subject.subjectType !== SubjectType.LAB && subject.subjectType !== SubjectType.INTEGRATED) continue;
+        const existingCount = sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).length;
+        let remaining = subject.weeklyHours - existingCount;
+        if (remaining <= 0) continue;
+
+        const labRoomId = this.getLabRoomForSession(subject.code, section.id);
+        const labHours = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
+
+        if (labHours > 0) {
+          const placed = this.placeConsecutive(
+            sessions, section.id, section.yearNumber, subject, labHours,
+            isFacultyFree, isSectionFree, markFaculty, markSection, labRoomId,
+          );
+          remaining -= placed;
+
+          // Aggressive retry if first attempt failed
+          if (placed === 0) {
+            for (const day of DAYS) {
+              const slots = this.timeSlotManager.getValidSlots(day);
+              for (let i = 0; i <= slots.length - 2; i++) {
+                const s1 = slots[i], s2 = slots[i + 1];
+                if (!this.timeSlotManager.areSlotsConsecutive(s1.slotIndex, s2.slotIndex)) continue;
+                if (!isSectionFree(section.id, day, s1.slotIndex) || !isSectionFree(section.id, day, s2.slotIndex)) continue;
+                if (labRoomId && (!this.isLabRoomFree(sessions, labRoomId, day, s1.slotIndex) || !this.isLabRoomFree(sessions, labRoomId, day, s2.slotIndex))) continue;
+                const fac = pickFaculty(subject, section.id, day, s1.slotIndex);
+                if (!fac) continue;
+                if (!isFacultyFree(fac, day, s2.slotIndex)) continue;
+                for (const sl of [s1, s2]) {
+                  sessions.push({
+                    sectionId: section.id, yearNumber: section.yearNumber,
+                    subjectCode: subject.code, facultyId: fac,
+                    day, slotIndex: sl.slotIndex, isFixed: false, isCareerPath: false,
+                    labRoomId,
+                  });
+                  markFaculty(fac, day, sl.slotIndex);
+                  markSection(section.id, day, sl.slotIndex);
+                  remaining--;
+                }
+                break;
+              }
+              if (remaining <= 0) break;
+            }
+          }
+        }
+      }
+
+      // --- Phase B: Place theory hours, prioritizing MANDATORY slots ---
       for (const subject of yearSubjects) {
         const existingCount = sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).length;
         let remaining = subject.weeklyHours - existingCount;
         if (remaining <= 0) continue;
 
-        const labRoomId = (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED)
-          ? this.getLabRoomForSession(subject.code, section.id)
-          : undefined;
-
-        // Handle lab/integrated continuous slots
-        if (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED) {
-          const labHours = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
-          if (labHours > 0) {
-            const placed = this.placeConsecutive(
-              sessions, section.id, section.yearNumber, subject, labHours,
-              isFacultyFree, isSectionFree, markFaculty, markSection, labRoomId
-            );
-            remaining -= placed;
-          }
-        }
-
-        // For integrated subjects, track which day the lab is on
+        // For integrated subjects, track lab day
         let labDay: Day | null = null;
         if (subject.subjectType === SubjectType.INTEGRATED) {
           const labSessions = sessions.filter(
-            s => s.sectionId === section.id && s.subjectCode === subject.code
+            s => s.sectionId === section.id && s.subjectCode === subject.code,
           );
           if (labSessions.length > 0) labDay = labSessions[0].day;
         }
 
-        // Distribute remaining theory hours across different days
         const daysUsed = new Set(
-          sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).map(s => s.day)
+          sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).map(s => s.day),
         );
 
         const shuffledDays = seededShuffle(DAYS, this.rand);
@@ -336,7 +377,11 @@ export class GeneticAlgorithm {
           if (subject.subjectType === SubjectType.THEORY && daysUsed.has(day)) continue;
 
           const slots = this.timeSlotManager.getValidSlots(day);
+          // Prioritize mandatory slots (0,1,2,4) that are empty for this section
           const prioritizedSlots = [...slots].sort((a, b) => {
+            const aMand = MANDATORY_SLOTS.includes(a.slotIndex) && isSectionFree(section.id, day, a.slotIndex) ? 0 : 1;
+            const bMand = MANDATORY_SLOTS.includes(b.slotIndex) && isSectionFree(section.id, day, b.slotIndex) ? 0 : 1;
+            if (aMand !== bMand) return aMand - bMand;
             const aMorning = MORNING_SLOTS.includes(a.slotIndex) ? 0 : 1;
             const bMorning = MORNING_SLOTS.includes(b.slotIndex) ? 0 : 1;
             return aMorning - bMorning || (this.rand() - 0.5);
@@ -375,47 +420,16 @@ export class GeneticAlgorithm {
           }
         }
 
-        // Fill any remaining — for lab/integrated that failed placeConsecutive, retry
-        if (remaining > 0 && (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED)) {
-          const labHoursNeeded = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
-          const labRoomIdRetry = (subject.subjectType === SubjectType.LAB || subject.subjectType === SubjectType.INTEGRATED)
-            ? this.getLabRoomForSession(subject.code, section.id) : undefined;
-          if (labHoursNeeded > 0) {
-            // Try all day+slot combinations more aggressively
-            for (const day of DAYS) {
-              const slots = this.timeSlotManager.getValidSlots(day);
-              for (let i = 0; i <= slots.length - 2; i++) {
-                const s1 = slots[i], s2 = slots[i + 1];
-                if (!this.timeSlotManager.areSlotsConsecutive(s1.slotIndex, s2.slotIndex)) continue;
-                if (!isSectionFree(section.id, day, s1.slotIndex) || !isSectionFree(section.id, day, s2.slotIndex)) continue;
-                if (labRoomIdRetry && (!this.isLabRoomFree(sessions, labRoomIdRetry, day, s1.slotIndex) || !this.isLabRoomFree(sessions, labRoomIdRetry, day, s2.slotIndex))) continue;
-                const fac = pickFaculty(subject, section.id, day, s1.slotIndex);
-                if (!fac) continue;
-                if (!isFacultyFree(fac, day, s2.slotIndex)) continue;
-                for (const sl of [s1, s2]) {
-                  sessions.push({
-                    sectionId: section.id, yearNumber: section.yearNumber,
-                    subjectCode: subject.code, facultyId: fac,
-                    day, slotIndex: sl.slotIndex, isFixed: false, isCareerPath: false,
-                    labRoomId: labRoomIdRetry,
-                  });
-                  markFaculty(fac, day, sl.slotIndex);
-                  markSection(section.id, day, sl.slotIndex);
-                  remaining--;
-                }
-                break;
-              }
-              if (remaining <= labHoursNeeded - 2) break;
-            }
-            // Adjust remaining for theory portion of integrated
-            remaining = subject.weeklyHours - sessions.filter(s => s.sectionId === section.id && s.subjectCode === subject.code).length;
-          }
-        }
-
-        // Fill any remaining theory hours in any available slot
+        // Fill any remaining in any available slot (mandatory slots first)
         if (remaining > 0) {
           for (const day of DAYS) {
-            for (const slot of this.timeSlotManager.getValidSlots(day)) {
+            const allSlots = this.timeSlotManager.getValidSlots(day);
+            const ordered = [...allSlots].sort((a, b) => {
+              const aMand = MANDATORY_SLOTS.includes(a.slotIndex) ? 0 : 1;
+              const bMand = MANDATORY_SLOTS.includes(b.slotIndex) ? 0 : 1;
+              return aMand - bMand;
+            });
+            for (const slot of ordered) {
               if (remaining <= 0) break;
               if (!isSectionFree(section.id, day, slot.slotIndex)) continue;
               if (slot.slotIndex === 0 && this.isFirstHourDuplicate(sessions, section.id, subject.code)) continue;
