@@ -112,6 +112,13 @@ export default function FacultyTimetable() {
                               </td>
                             );
                           }
+                          if (slot.slotIndex === -2) {
+                            return (
+                              <td key={i} className="p-2 border text-center bg-muted/50 text-muted-foreground">
+                                <div className="font-semibold text-[10px]">BREAK</div>
+                              </td>
+                            );
+                          }
                           const session = getSession(fac.id, day, slot.slotIndex);
                           if (!session) {
                             return <td key={i} className="p-2 border text-center text-muted-foreground">—</td>;
@@ -122,9 +129,10 @@ export default function FacultyTimetable() {
                           const isLab = session.isCareerPath
                             ? isCareerLab
                             : !!(subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED));
-                          const typeLabel = session.isCareerPath
+                          const typeLabel = isLab ? 'Lab' : 'Theory';
+                          const cpLabel = session.isCareerPath
                             ? (isCareerLab ? 'CP-LAB' : 'CP')
-                            : (isLab ? 'LAB' : null);
+                            : null;
                           const isSecondFac = session.secondFacultyId === fac.id;
 
                           return (
@@ -135,11 +143,12 @@ export default function FacultyTimetable() {
                                 isLab ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'
                               )}
                             >
-                              <div className="font-bold">{session.subjectCode}</div>
+                              <div className="font-bold">{subj?.name || session.subjectCode}</div>
+                              <div className="text-[10px] opacity-80">({typeLabel})</div>
                               <div className="text-[10px] opacity-75">
                                 Y{session.yearNumber}-{section?.name || session.sectionId}
                               </div>
-                              {typeLabel && <Badge variant="outline" className="text-[8px] mt-0.5">{typeLabel}</Badge>}
+                              {cpLabel && <Badge variant="outline" className="text-[8px] mt-0.5">{cpLabel}</Badge>}
                               {isSecondFac && <Badge variant="secondary" className="text-[8px] mt-0.5">2nd</Badge>}
                             </td>
                           );

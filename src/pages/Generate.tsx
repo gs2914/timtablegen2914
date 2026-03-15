@@ -181,8 +181,9 @@ export default function Generate() {
           <div className="text-[10px] text-muted-foreground space-y-0.5">
             <p className="font-semibold">Hard Constraints:</p>
             <p>• No faculty conflicts • No back-to-back faculty classes • First-hour subject diversity</p>
-            <p>• Lab strict 2-hour continuity (no split labs) • Lab room clash prevention • Career path sync (year-specific)</p>
-            <p>• At most one leisure slot/day • Leisure only from 2:00 PM onwards</p>
+            <p>• Lab strict 2-hour continuity • Lab room clash prevention • Career path sync (year-specific)</p>
+            <p>• Leisure only at 12:10–1:10 or 3:00–4:00 • Max 1 leisure/day • No leisure at first period or after lunch</p>
+            <p>• Break: 11:00–11:10 (fixed)</p>
           </div>
 
           {running && (
