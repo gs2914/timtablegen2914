@@ -146,7 +146,7 @@ export default function DataInput() {
   const [subFaculty, setSubFaculty] = useState('');
   const [subEligibleFaculty, setSubEligibleFaculty] = useState<string[]>([]);
   const [subHours, setSubHours] = useState('3');
-  const [subType, setSubType] = useState<SubjectType>(SubjectType.THEORY);
+  
   const [subLabHours, setSubLabHours] = useState('0');
   const [subYear, setSubYear] = useState('1');
 
