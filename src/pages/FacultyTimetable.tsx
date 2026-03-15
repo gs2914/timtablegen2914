@@ -88,11 +88,14 @@ export default function FacultyTimetable() {
                             'p-2 border font-semibold text-center',
                             s.slotIndex === -1
                               ? 'bg-accent text-accent-foreground'
+                              : s.slotIndex === -2
+                              ? 'bg-muted text-muted-foreground'
                               : 'bg-primary text-primary-foreground'
                           )}
                         >
                           {s.startTime}<br />{s.endTime}
                           {s.slotIndex === -1 && <><br /><span className="text-[9px]">LUNCH</span></>}
+                          {s.slotIndex === -2 && <><br /><span className="text-[9px]">BREAK</span></>}
                         </th>
                       ))}
                     </tr>
