@@ -665,9 +665,12 @@ export class GeneticAlgorithm {
       }
     }
 
-    // 3. Repair broken lab continuity: ensure every lab/integrated subject
-    //    has exactly 2 continuous hours. If split or partial, re-place them.
+    // 3. Repair broken lab continuity for LAB and INTEGRATED subjects
     repaired = this.repairLabContinuity(repaired);
+
+    // 4. Repair leisure violations: ensure mandatory slots (0,1,2,4) are filled
+    //    by swapping sessions from optional slots (3,5) into empty mandatory slots
+    repaired = this.repairLeisure(repaired);
 
     return repaired;
   }
