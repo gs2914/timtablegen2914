@@ -123,7 +123,7 @@ export class GeneticAlgorithm {
       if (onProgress) onProgress(gen, bestFitness);
 
       if (bestFitness <= 1) {
-        const finalTimetable = this.ensureLabContinuity(bestChromosome);
+        const finalTimetable = this.repairLeisure(this.ensureLabContinuity(bestChromosome));
         const finalFitness = this.constraintEngine.calculateFitness(finalTimetable);
         return {
           timetable: finalTimetable,
