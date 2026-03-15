@@ -216,65 +216,50 @@ export class ConstraintEngine {
   private checkLabContinuity(sessions: ClassSession[]): ConstraintViolation[] {
     const violations: ConstraintViolation[] = [];
 
-    // Enforce exact 2-hour continuous blocks for LAB subjects
-    const labSubjects = [...this.subjects.values()].filter(s => s.subjectType === SubjectType.LAB);
+    // Enforce exact 2-hour continuous blocks for LAB and INTEGRATED subjects
+    const labSubjects = [...this.subjects.values()].filter(
+      s => s.subjectType === SubjectType.LAB || s.subjectType === SubjectType.INTEGRATED
+    );
 
     for (const subject of labSubjects) {
+      const expectedLabHours = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
+      if (expectedLabHours <= 0 || expectedLabHours % 2 !== 0) continue;
+
       const yearSectionIds = [...new Set(sessions
         .filter(s => s.yearNumber === subject.yearNumber)
         .map(s => s.sectionId))];
 
       for (const sectionId of yearSectionIds) {
-        const labSessions = sessions
+        // For integrated subjects, only count sessions that are part of a continuous pair (lab portion)
+        const allSubjSessions = sessions
           .filter(s => !s.isCareerPath && s.sectionId === sectionId && s.subjectCode === subject.code)
           .sort((a, b) => a.day.localeCompare(b.day) || a.slotIndex - b.slotIndex);
 
-        if (labSessions.length !== subject.weeklyHours) {
-          violations.push({
-            type: 'hard',
-            message: `Lab hours mismatch: ${subject.code} in ${sectionId}`,
-            penalty: 1000,
-          });
-          continue;
-        }
-
-        if (labSessions.length % 2 !== 0) {
-          violations.push({
-            type: 'hard',
-            message: `Lab not in 2-hour blocks: ${subject.code} in ${sectionId}`,
-            penalty: 1000,
-          });
-          continue;
-        }
-
+        // Find continuous pairs
         const byDay = new Map<Day, number[]>();
-        for (const session of labSessions) {
+        for (const session of allSubjSessions) {
           if (!byDay.has(session.day)) byDay.set(session.day, []);
           byDay.get(session.day)!.push(session.slotIndex);
         }
 
+        let continuousPairCount = 0;
         for (const [day, daySlots] of byDay) {
           daySlots.sort((a, b) => a - b);
-          if (daySlots.length % 2 !== 0) {
-            violations.push({
-              type: 'hard',
-              message: `Odd lab count on ${day}: ${subject.code} in ${sectionId}`,
-              penalty: 1000,
-            });
-            continue;
-          }
-
-          for (let i = 0; i < daySlots.length; i += 2) {
-            const first = daySlots[i];
-            const second = daySlots[i + 1];
-            if (second === undefined || !this.timeSlotManager.areSlotsConsecutive(first, second)) {
-              violations.push({
-                type: 'hard',
-                message: `Lab not continuous: ${subject.code} in ${sectionId} on ${day}`,
-                penalty: 1000,
-              });
+          for (let i = 0; i < daySlots.length - 1; i++) {
+            if (this.timeSlotManager.areSlotsConsecutive(daySlots[i], daySlots[i + 1])) {
+              continuousPairCount++;
+              i++; // skip the second slot of the pair
             }
           }
+        }
+
+        const expectedPairs = expectedLabHours / 2;
+        if (continuousPairCount < expectedPairs) {
+          violations.push({
+            type: 'hard',
+            message: `Lab not continuous: ${subject.code} in ${sectionId} (${continuousPairCount}/${expectedPairs} pairs)`,
+            penalty: 1000,
+          });
         }
       }
     }
