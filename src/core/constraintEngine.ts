@@ -377,9 +377,11 @@ export class ConstraintEngine {
   }
 
   // ─── LEISURE PLACEMENT RULES ──────────────────────────────────
-  // Rule 1: At most one leisure slot per day (if any)
-  // Rule 2: Leisure is allowed only in afternoon (2:00 PM onwards => slotIndex >= 4)
+  // Leisure allowed ONLY at slot 3 (12:10-1:10) or slot 5 (3:00-4:00)
+  // First period (slot 0) must NEVER be leisure
+  // Period after lunch (slot 4) must NEVER be leisure
   private checkLeisureHourPlacement(sessions: ClassSession[]): ConstraintViolation[] {
+    const ALLOWED_LEISURE_SLOTS = new Set([3, 5]); // 12:10-1:10 and 3:00-4:00
     const violations: ConstraintViolation[] = [];
     const sectionIds = [...new Set(sessions.map(s => s.sectionId))];
 
@@ -392,29 +394,48 @@ export class ConstraintEngine {
         byDay.get(s.day)!.add(s.slotIndex);
       }
 
-      // Only evaluate days that actually have classes (no forced leisure on empty days)
       for (const [day, occupiedSlots] of byDay) {
         const validSlots = this.timeSlotManager.getValidSlots(day).map(s => s.slotIndex);
         const leisureSlots = validSlots.filter(slot => !occupiedSlots.has(slot));
 
         if (leisureSlots.length === 0) continue;
 
-        if (leisureSlots.length > 1) {
+        // Hard: first period cannot be leisure
+        if (leisureSlots.includes(0)) {
           violations.push({
             type: 'hard',
-            message: `Multiple leisure slots in a day: ${sectionId} ${day}`,
+            message: `First period is leisure: ${sectionId} ${day}`,
             penalty: 1000,
           });
         }
 
+        // Hard: period after lunch (slot 4) cannot be leisure
+        if (leisureSlots.includes(4)) {
+          violations.push({
+            type: 'hard',
+            message: `Post-lunch period is leisure: ${sectionId} ${day}`,
+            penalty: 1000,
+          });
+        }
+
+        // Hard: leisure only allowed at slots 3 and 5
         for (const slot of leisureSlots) {
-          if (slot < 4) {
+          if (!ALLOWED_LEISURE_SLOTS.has(slot)) {
             violations.push({
               type: 'hard',
-              message: `Leisure outside afternoon window: ${sectionId} ${day} slot ${slot}`,
+              message: `Leisure at invalid slot ${slot}: ${sectionId} ${day}`,
               penalty: 1000,
             });
           }
+        }
+
+        // Hard: at most one leisure per day
+        if (leisureSlots.length > 1) {
+          violations.push({
+            type: 'hard',
+            message: `Multiple leisure slots: ${sectionId} ${day}`,
+            penalty: 1000,
+          });
         }
       }
     }

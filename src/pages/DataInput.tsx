@@ -341,7 +341,7 @@ export default function DataInput() {
                 <div><Label className="text-xs">Code</Label><Input value={subCode} onChange={(e) => setSubCode(e.target.value)} placeholder="CS101" className="h-8 text-sm" /></div>
                 <div><Label className="text-xs">Name</Label><Input value={subName} onChange={(e) => setSubName(e.target.value)} placeholder="Data Structures" className="h-8 text-sm" /></div>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label className="text-xs">Faculty</Label>
                   <Select value={subFaculty} onValueChange={setSubFaculty}>
@@ -349,7 +349,6 @@ export default function DataInput() {
                     <SelectContent>{data.faculty.map((f) => <SelectItem key={f.id} value={f.id}>{f.shortName}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div><Label className="text-xs">Hrs/Week</Label><Input type="number" value={subHours} onChange={(e) => setSubHours(e.target.value)} className="h-8 text-sm" /></div>
                 <div><Label className="text-xs">Year</Label><Input type="number" value={subYear} onChange={(e) => setSubYear(e.target.value)} min="1" max="4" className="h-8 text-sm" /></div>
               </div>
               <div className="grid grid-cols-2 gap-2">
