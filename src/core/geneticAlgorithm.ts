@@ -847,10 +847,12 @@ export class GeneticAlgorithm {
     for (let attempt = 0; attempt < 5; attempt++) {
       let valid = true;
 
-      const labSubjects = this.subjects.filter(s => s.subjectType === SubjectType.LAB);
+      const labSubjects = this.subjects.filter(s => s.subjectType === SubjectType.LAB || s.subjectType === SubjectType.INTEGRATED);
       for (const section of this.sections) {
         for (const subject of labSubjects.filter(s => s.yearNumber === section.yearNumber)) {
-          if (!this.isValidLabScheduleForSubject(result, section.id, subject.code, subject.weeklyHours)) {
+          const expectedLabHours = subject.subjectType === SubjectType.INTEGRATED ? subject.labHours : subject.weeklyHours;
+          if (expectedLabHours <= 0 || expectedLabHours % 2 !== 0) continue;
+          if (!this.isValidLabScheduleForSubject(result, section.id, subject.code, expectedLabHours)) {
             valid = false;
             break;
           }
@@ -863,5 +865,53 @@ export class GeneticAlgorithm {
     }
 
     return result;
+  }
+
+  /** Repair leisure violations: move sessions from optional slots (3,5) to empty mandatory slots (0,1,2,4) */
+  private repairLeisure(sessions: ClassSession[]): ClassSession[] {
+    const MANDATORY_SLOTS = [0, 1, 2, 4];
+    const repaired = sessions.map(s => ({ ...s }));
+
+    for (const section of this.sections) {
+      for (const day of DAYS) {
+        const sectionDaySessions = repaired.filter(
+          s => s.sectionId === section.id && s.day === day
+        );
+        const occupiedSlots = new Set(sectionDaySessions.map(s => s.slotIndex));
+
+        // Find empty mandatory slots
+        const emptyMandatory = MANDATORY_SLOTS.filter(slot => !occupiedSlots.has(slot));
+        if (emptyMandatory.length === 0) continue;
+
+        // Find movable sessions in optional slots (3, 5)
+        const movableSessions = sectionDaySessions.filter(s => {
+          if (s.isFixed || s.isCareerPath) return false;
+          if (s.slotIndex !== 3 && s.slotIndex !== 5) return false;
+          // Don't move lab sessions that are part of a continuous pair
+          const subj = this.subjectMap.get(s.subjectCode);
+          if (subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED)) {
+            const pairSlot = sectionDaySessions.find(
+              other => other !== s && other.subjectCode === s.subjectCode
+                && this.timeSlotManager.areSlotsConsecutive(other.slotIndex, s.slotIndex)
+            );
+            if (pairSlot) return false; // Part of a lab pair, don't move
+          }
+          return true;
+        });
+
+        for (let i = 0; i < emptyMandatory.length && i < movableSessions.length; i++) {
+          const session = movableSessions[i];
+          // Check faculty is free at the target slot
+          const targetSlot = emptyMandatory[i];
+          const facultyBusy = repaired.some(
+            s => s !== session && s.facultyId === session.facultyId && s.day === day && s.slotIndex === targetSlot
+          );
+          if (facultyBusy) continue;
+          session.slotIndex = targetSlot;
+        }
+      }
+    }
+
+    return repaired;
   }
 }
