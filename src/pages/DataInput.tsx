@@ -146,7 +146,7 @@ export default function DataInput() {
   const [subFaculty, setSubFaculty] = useState('');
   const [subEligibleFaculty, setSubEligibleFaculty] = useState<string[]>([]);
   const [subHours, setSubHours] = useState('3');
-  const [subType, setSubType] = useState<SubjectType>(SubjectType.THEORY);
+  
   const [subLabHours, setSubLabHours] = useState('0');
   const [subYear, setSubYear] = useState('1');
 
@@ -158,14 +158,25 @@ export default function DataInput() {
 
   const addSubject = () => {
     if (!subCode || !subName || !subFaculty) return;
+    const theoryHrs = parseInt(subHours) || 0;
+    const labHrs = parseInt(subLabHours) || 0;
+    const totalHrs = theoryHrs + labHrs;
+    if (totalHrs <= 0) {
+      toast({ title: 'Total hours must be > 0', variant: 'destructive' });
+      return;
+    }
+    // Auto-determine type: lab only, theory only, or integrated (both)
+    let autoType = SubjectType.THEORY;
+    if (labHrs > 0 && theoryHrs === 0) autoType = SubjectType.LAB;
+    else if (labHrs > 0 && theoryHrs > 0) autoType = SubjectType.INTEGRATED;
     const eligibleFacultyIds = [...new Set([subFaculty, ...subEligibleFaculty])];
     dispatch({
       type: 'ADD_SUBJECT',
       payload: {
         code: subCode, name: subName, facultyId: subFaculty,
         eligibleFacultyIds,
-        weeklyHours: parseInt(subHours), subjectType: subType,
-        labHours: parseInt(subLabHours), yearNumber: parseInt(subYear),
+        weeklyHours: totalHrs, subjectType: autoType,
+        labHours: labHrs, yearNumber: parseInt(subYear),
       },
     });
     setSubCode(''); setSubName(''); setSubEligibleFaculty([]);
@@ -341,7 +352,7 @@ export default function DataInput() {
                 <div><Label className="text-xs">Code</Label><Input value={subCode} onChange={(e) => setSubCode(e.target.value)} placeholder="CS101" className="h-8 text-sm" /></div>
                 <div><Label className="text-xs">Name</Label><Input value={subName} onChange={(e) => setSubName(e.target.value)} placeholder="Data Structures" className="h-8 text-sm" /></div>
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label className="text-xs">Faculty</Label>
                   <Select value={subFaculty} onValueChange={setSubFaculty}>
@@ -349,22 +360,11 @@ export default function DataInput() {
                     <SelectContent>{data.faculty.map((f) => <SelectItem key={f.id} value={f.id}>{f.shortName}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div><Label className="text-xs">Hrs/Week</Label><Input type="number" value={subHours} onChange={(e) => setSubHours(e.target.value)} className="h-8 text-sm" /></div>
                 <div><Label className="text-xs">Year</Label><Input type="number" value={subYear} onChange={(e) => setSubYear(e.target.value)} min="1" max="4" className="h-8 text-sm" /></div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-xs">Type</Label>
-                  <Select value={subType} onValueChange={(v) => setSubType(v as SubjectType)}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={SubjectType.THEORY}>Theory</SelectItem>
-                      <SelectItem value={SubjectType.LAB}>Lab</SelectItem>
-                      <SelectItem value={SubjectType.INTEGRATED}>Integrated</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div><Label className="text-xs">Lab Hours</Label><Input type="number" value={subLabHours} onChange={(e) => setSubLabHours(e.target.value)} className="h-8 text-sm" /></div>
+                <div><Label className="text-xs">Theory Hours/Week</Label><Input type="number" value={subHours} onChange={(e) => setSubHours(e.target.value)} min="0" className="h-8 text-sm" /></div>
+                <div><Label className="text-xs">Lab Hours/Week</Label><Input type="number" value={subLabHours} onChange={(e) => setSubLabHours(e.target.value)} min="0" className="h-8 text-sm" /></div>
               </div>
               {data.faculty.length > 0 && (
                 <div>

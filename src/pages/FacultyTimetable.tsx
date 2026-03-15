@@ -8,7 +8,9 @@ import { DAYS, SLOT_DEFINITIONS } from '@/core/timeSlotManager';
 import { cn } from '@/lib/utils';
 
 const DISPLAY_SLOTS = [
-  ...SLOT_DEFINITIONS.slice(0, 4),
+  ...SLOT_DEFINITIONS.slice(0, 2),
+  { slotIndex: -2, startTime: '11:00', endTime: '11:10' }, // Break
+  ...SLOT_DEFINITIONS.slice(2, 4),
   { slotIndex: -1, startTime: '13:10', endTime: '14:00' }, // Lunch
   ...SLOT_DEFINITIONS.slice(4, 6),
 ];
@@ -86,11 +88,14 @@ export default function FacultyTimetable() {
                             'p-2 border font-semibold text-center',
                             s.slotIndex === -1
                               ? 'bg-accent text-accent-foreground'
+                              : s.slotIndex === -2
+                              ? 'bg-muted text-muted-foreground'
                               : 'bg-primary text-primary-foreground'
                           )}
                         >
                           {s.startTime}<br />{s.endTime}
                           {s.slotIndex === -1 && <><br /><span className="text-[9px]">LUNCH</span></>}
+                          {s.slotIndex === -2 && <><br /><span className="text-[9px]">BREAK</span></>}
                         </th>
                       ))}
                     </tr>
@@ -107,6 +112,13 @@ export default function FacultyTimetable() {
                               </td>
                             );
                           }
+                          if (slot.slotIndex === -2) {
+                            return (
+                              <td key={i} className="p-2 border text-center bg-muted/50 text-muted-foreground">
+                                <div className="font-semibold text-[10px]">BREAK</div>
+                              </td>
+                            );
+                          }
                           const session = getSession(fac.id, day, slot.slotIndex);
                           if (!session) {
                             return <td key={i} className="p-2 border text-center text-muted-foreground">—</td>;
@@ -117,9 +129,10 @@ export default function FacultyTimetable() {
                           const isLab = session.isCareerPath
                             ? isCareerLab
                             : !!(subj && (subj.subjectType === SubjectType.LAB || subj.subjectType === SubjectType.INTEGRATED));
-                          const typeLabel = session.isCareerPath
+                          const typeLabel = isLab ? 'Lab' : 'Theory';
+                          const cpLabel = session.isCareerPath
                             ? (isCareerLab ? 'CP-LAB' : 'CP')
-                            : (isLab ? 'LAB' : null);
+                            : null;
                           const isSecondFac = session.secondFacultyId === fac.id;
 
                           return (
@@ -130,11 +143,12 @@ export default function FacultyTimetable() {
                                 isLab ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'
                               )}
                             >
-                              <div className="font-bold">{session.subjectCode}</div>
+                              <div className="font-bold">{subj?.name || session.subjectCode}</div>
+                              <div className="text-[10px] opacity-80">({typeLabel})</div>
                               <div className="text-[10px] opacity-75">
                                 Y{session.yearNumber}-{section?.name || session.sectionId}
                               </div>
-                              {typeLabel && <Badge variant="outline" className="text-[8px] mt-0.5">{typeLabel}</Badge>}
+                              {cpLabel && <Badge variant="outline" className="text-[8px] mt-0.5">{cpLabel}</Badge>}
                               {isSecondFac && <Badge variant="secondary" className="text-[8px] mt-0.5">2nd</Badge>}
                             </td>
                           );
