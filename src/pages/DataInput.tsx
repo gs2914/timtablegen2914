@@ -353,18 +353,8 @@ export default function DataInput() {
                 <div><Label className="text-xs">Year</Label><Input type="number" value={subYear} onChange={(e) => setSubYear(e.target.value)} min="1" max="4" className="h-8 text-sm" /></div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label className="text-xs">Type</Label>
-                  <Select value={subType} onValueChange={(v) => setSubType(v as SubjectType)}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={SubjectType.THEORY}>Theory</SelectItem>
-                      <SelectItem value={SubjectType.LAB}>Lab</SelectItem>
-                      <SelectItem value={SubjectType.INTEGRATED}>Integrated</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div><Label className="text-xs">Lab Hours</Label><Input type="number" value={subLabHours} onChange={(e) => setSubLabHours(e.target.value)} className="h-8 text-sm" /></div>
+                <div><Label className="text-xs">Theory Hours/Week</Label><Input type="number" value={subHours} onChange={(e) => setSubHours(e.target.value)} min="0" className="h-8 text-sm" /></div>
+                <div><Label className="text-xs">Lab Hours/Week</Label><Input type="number" value={subLabHours} onChange={(e) => setSubLabHours(e.target.value)} min="0" className="h-8 text-sm" /></div>
               </div>
               {data.faculty.length > 0 && (
                 <div>
